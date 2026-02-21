@@ -168,16 +168,15 @@ impl BackupManager {
                     ));
                 }
 
-                // Backup directory must exist
+                // Auto-create backup directory if it doesn't exist
                 if !backup_dir.exists() {
-                    return Err(anyhow::anyhow!(
-                        "Backup directory does not exist: {:?} (source: {:?})",
-                        backup_dir, source.source_dir
-                    ));
-                }
-
-                // Backup must be a directory
-                if !backup_dir.is_dir() {
+                    std::fs::create_dir_all(backup_dir)
+                        .map_err(|e| anyhow::anyhow!(
+                            "Failed to create backup directory {:?} (source: {:?}): {}",
+                            backup_dir, source.source_dir, e
+                        ))?;
+                    info!("Auto-created backup directory: {:?}", backup_dir);
+                } else if !backup_dir.is_dir() {
                     return Err(anyhow::anyhow!(
                         "Backup path is not a directory: {:?} (source: {:?})",
                         backup_dir, source.source_dir
