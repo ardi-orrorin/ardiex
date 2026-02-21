@@ -50,6 +50,7 @@ pub async fn handle_config(action: ConfigAction) -> Result<()> {
             println!("  Full backup interval: {} (inc backups before forced full)", config.full_backup_interval);
             println!("  Cron schedule: {}", config.cron_schedule);
             println!("  Min interval by size: {}", config.enable_min_interval_by_size);
+            println!("  Max log file size (MB): {}", config.max_log_file_size_mb);
             println!("  Exclude patterns: {:?}", config.exclude_patterns);
             println!("\nSources:");
             for source in &config.sources {
@@ -195,6 +196,14 @@ pub async fn handle_config(action: ConfigAction) -> Result<()> {
                 "enable_min_interval_by_size" => {
                     config.enable_min_interval_by_size = value.parse()
                         .context("Invalid value for enable_min_interval_by_size")?;
+                }
+                "max_log_file_size_mb" => {
+                    let v: u64 = value.parse()
+                        .context("Invalid value for max_log_file_size_mb")?;
+                    if v == 0 {
+                        return Err(anyhow::anyhow!("max_log_file_size_mb must be > 0"));
+                    }
+                    config.max_log_file_size_mb = v;
                 }
                 _ => {
                     warn!("Unknown configuration key: {}", key);

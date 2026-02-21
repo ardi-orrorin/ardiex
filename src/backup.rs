@@ -68,6 +68,9 @@ impl BackupManager {
         if config.full_backup_interval == 0 {
             return Err(anyhow::anyhow!("Global full_backup_interval must be > 0"));
         }
+        if config.max_log_file_size_mb == 0 {
+            return Err(anyhow::anyhow!("Global max_log_file_size_mb must be > 0"));
+        }
 
         // ── Per-source validation ──
 
@@ -848,6 +851,7 @@ mod tests {
             full_backup_interval: 10,
             cron_schedule: "0 0 * * * *".to_string(),
             enable_min_interval_by_size: true,
+            max_log_file_size_mb: 20,
             metadata: HashMap::new(),
         };
 

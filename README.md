@@ -18,6 +18,9 @@
 - **Delta 체인 검증**: 백업 시작 시 기존 delta 파일 무결성 검증, 손상 시 full 전환
 - **글로벌/소스별 설정**: 소스별 설정이 글로벌 설정을 오버라이드
 - **시작 시 검증**: 프로그램 시작 시 설정 파일 전체 유효성 검사
+- **`run` 핫리로드**: 실행 중 `settings.json` 변경 감지 후 런타임 작업(스케줄러/워처) 재구성
+- **설정 스냅샷 출력**: `run` 시작 시 현재 설정을 pretty JSON으로 콘솔/로그에 출력
+- **로그 회전/압축**: `max_log_file_size_mb` 초과 시 gzip 압축 + 날짜 suffix로 자동 회전
 
 ### 2. 트리거 방식
 
@@ -113,6 +116,7 @@ Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
   "enable_event_driven": true,
   "exclude_patterns": ["*.tmp", "*.log", ".git/*"],
   "max_backups": 10,
+  "max_log_file_size_mb": 20,
   "backup_mode": "delta",
   "full_backup_interval": 10,
   "cron_schedule": "0 0 * * * *",
@@ -135,7 +139,7 @@ Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
 프로그램 시작(`backup`, `run`) 시 다음 항목을 자동 검증합니다:
 
 - 글로벌 `cron_schedule` 유효성
-- 글로벌 `max_backups > 0`, `full_backup_interval > 0`
+- 글로벌 `max_backups > 0`, `full_backup_interval > 0`, `max_log_file_size_mb > 0`
 - 소스 중복 여부
 - 소스/백업 경로: 절대경로, 존재 여부, 디렉토리 여부
 - 소스 == 백업 동일 경로 금지, 백업 중복 검사
@@ -219,6 +223,11 @@ cargo build --release
 ./ardiex run
 
 # cron 스케줄 기반 백업과 파일 변경 감지 백업이 동시에 실행됨
+# 시작 시 현재 설정값을 pretty JSON으로 출력
+# [CONFIG] { "phase": "startup", "config": { ... } }
+# 실행 중 settings.json 변경 시 핫리로드 로그 출력
+# [HOT-RELOAD] Detected settings.json change ...
+# [HOT-RELOAD] Applied successfully ...
 ```
 
 ### 5. 설정 변경
@@ -228,6 +237,7 @@ cargo build --release
 ./ardiex config set enable_periodic false
 ./ardiex config set enable_event_driven false
 ./ardiex config set max_backups 20
+./ardiex config set max_log_file_size_mb 50  # 로그 파일 50MB마다 회전
 ./ardiex config set backup_mode delta          # delta 또는 copy
 ./ardiex config set full_backup_interval 10    # N번 inc 후 full 강제
 ./ardiex config set cron_schedule "0 */30 * * * *"  # 30분마다 (초 분 시 일 월 요일)
@@ -297,8 +307,8 @@ cargo build --release
 2. **변경 감지**: 이전 해시와 비교하여 변경된 파일 식별
 3. **Delta 체인 검증**: 기존 delta 파일 무결성 확인, 손상 시 full 전환
 4. **Full 강제 확인**: `full_backup_interval` 도달 시 full 백업 강제
-5. **Delta 백업**: 변경된 파일을 4KB 블록 단위로 비교하여 변경된 블록만 저장
-6. **자동 판단**: delta 크기가 원본의 50% 미만이면 delta 저장, 아니면 전체 복사
+5. **Delta 백업**: 이전 백업 파일이 있으면 4KB 블록 단위 비교 후 `.delta` 파일 저장
+6. **Fallback 복사**: 이전 파일이 없으면 변경 파일 전체 복사
 7. **메타데이터 업데이트**: 파일 해시 정보 저장
 
 ### Copy 모드 프로세스
@@ -325,11 +335,30 @@ backup/
 백업 및 복구 시 10% 단위로 진행률이 로그에 기록됩니다.
 
 ```
-[INFO] Backup progress: 10% (10/100 files)
-[INFO] Backup progress: 20% (20/100 files)
+[2026-02-21 12:30:00.123 INFO ardiex::backup] Backup progress: 10% (10/100 files)
+[2026-02-21 12:30:01.456 INFO ardiex::backup] Backup progress: 20% (20/100 files)
 ...
-[INFO] Restore progress: 50% - Applied backup 'full_20240221_100000123': 50 files restored
+[2026-02-21 12:30:05.000 INFO ardiex::restore] Restore progress: 50% - Applied backup 'full_20240221_100000123': 50 files restored
 ```
+
+## 설정 에디터 (Web)
+
+- 파일: `src/editor/settings-editor.html`
+- `settings.json` 파일만 불러오기 허용 (파일 열기 + 화면 전체 Drag & Drop)
+- 불러오기 시 JSON 파싱 + 스키마 검증 실패하면 즉시 에러
+- 저장 버튼은 파일을 불러온 뒤에만 활성화
+- File System Access API 지원 브라우저에서 열린 파일에 덮어쓰기 저장
+- JSON 미리보기 토글 + "미리보기 JSON 복사" 버튼 제공
+- 폼 값 변경 시 JSON 미리보기 자동 갱신
+- 파일 드롭 관련 안내 문구를 "파일 불러오기"로 통일
+
+## 로그 파일 관리
+
+- 로그 파일: 실행 파일 경로의 `logs/ardiex.log`
+- 로그 시간: 로컬 타임(`%Y-%m-%d %H:%M:%S%.3f`)
+- 회전 기준: 글로벌 설정 `max_log_file_size_mb` (기본 20MB)
+- 회전 시 파일명 suffix: `%Y-%m-%d_%H-%M-%S`
+- 회전된 로그는 gzip으로 자동 압축, 최대 30개 보관
 
 ## 기술 스택
 
@@ -386,11 +415,16 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
 
 ## 모듈 구조
 
-1. **config.rs** - 설정 파일 관리
-2. **backup.rs** - 증분 백업 로직 + 시작 시 검증
-3. **delta.rs** - 블록 단위 delta 백업/복원
-4. **restore.rs** - 백업 복구 관리
-5. **watcher.rs** - 파일 시스템 감시
-6. **logger.rs** - 파일 로깅
-7. **main.rs** - CLI 인터페이스 및 메인 로직
-8. **editor/settings-editor.html** - 설정 파일 웹 편집기
+1. **main.rs** - 엔트리포인트 + 로거 초기화 + 명령어 디스패치
+2. **cli.rs** - Clap CLI 스키마 (`config/backup/restore/run`)
+3. **commands/config_cmd.rs** - 설정 관리 커맨드 처리
+4. **commands/backup_cmd.rs** - 수동 백업 커맨드 처리
+5. **commands/restore_cmd.rs** - 복구 커맨드 처리
+6. **commands/run_cmd.rs** - 서비스 실행 + 주기/이벤트 트리거 + 핫리로드
+7. **config.rs** - 설정 파일 로드/저장 + 기본값 + 소스/글로벌 병합
+8. **backup.rs** - 증분 백업 로직 + 시작 시 검증 + full/inc 결정
+9. **delta.rs** - 블록 단위 delta 백업/복원
+10. **restore.rs** - 백업 복구 관리
+11. **watcher.rs** - 파일 시스템 감시
+12. **logger.rs** - 파일 로깅(로컬타임, 회전/압축)
+13. **editor/settings-editor.html** - 설정 파일 웹 편집기

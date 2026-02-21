@@ -16,18 +16,24 @@ Ardiex는 Rust로 구현된 증분 백업 시스템으로, 주기적 백업과 I
 ```
 ardiex/
 ├── src/
-│   ├── main.rs          # CLI 엔트리포인트
+│   ├── main.rs          # 엔트리포인트 + 로거 초기화 + 명령어 디스패치
+│   ├── cli.rs           # clap CLI 스키마
+│   ├── commands/
+│   │   ├── config_cmd.rs   # config 하위 커맨드 처리
+│   │   ├── backup_cmd.rs   # 수동 백업 커맨드 처리
+│   │   ├── restore_cmd.rs  # 복구 커맨드 처리
+│   │   └── run_cmd.rs      # 서비스 실행 + 핫리로드
 │   ├── config.rs        # 설정 파일 관리
 │   ├── backup.rs        # 증분 백업 로직 + 시작 시 검증
 │   ├── delta.rs         # 블록 단위 delta 백업/복원
 │   ├── restore.rs       # 백업 복구 관리
 │   ├── watcher.rs       # 파일 시스템 감시
-│   ├── logger.rs        # 파일 로깅
+│   ├── logger.rs        # 파일 로깅(로컬타임, 회전/압축)
 │   └── editor/
 │       └── settings-editor.html  # 설정 파일 웹 편집기
 ├── settings.json        # 실행 시 생성되는 설정 파일
 ├── README.md            # 프로젝트 명세 및 사용법
-└── skill.md             # 기술 구현 가이드
+└── SKILL.md             # 기술 구현 가이드
 ```
 
 ### 2. 핵심 개념 이해
@@ -54,7 +60,8 @@ ardiex/
 #### 글로벌/소스별 설정
 
 - 소스별 설정이 존재하면 글로벌 오버라이드
-- 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `enable_event_driven`, `enable_periodic`
+- 소스별 오버라이드 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- 글로벌 전용 필드: `enable_min_interval_by_size`, `max_log_file_size_mb`
 - `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - `config set-source <source> <key> reset`으로 초기화
 
@@ -70,6 +77,13 @@ ardiex/
 1. **Cron 스케줄링**: crontab 표현식으로 소스별 개별 스케줄링
 2. **이벤트 기반**: notify crate로 파일 변경 감지 시 실행 (delta 모드만)
 3. **용량 기반 최소 주기**: ~10MB→1초, ~100MB→1분, ~1GB→1시간, 이후 GB당 1시간
+
+#### run 핫리로드
+
+- `run`은 `settings.json`을 주기적으로 재읽고(2초 간격) 변경을 감지하면 핫리로드 시도
+- 새 설정이 유효하면 스케줄러/워처 task를 재구성하고 즉시 반영
+- 새 설정이 잘못되면 기존 런타임 유지 + `[HOT-RELOAD] Rejected invalid configuration` 로그 남김
+- 시작 시/핫리로드 시 설정 스냅샷을 pretty JSON으로 콘솔/로그 출력 (`[CONFIG]`)
 
 ### 3. 주요 작업별 코드 위치
 
@@ -109,26 +123,37 @@ ardiex/
 #### 로깅 작업
 
 - 파일: `src/logger.rs`
-- 함수: `init_file_logging()`
+- 함수: `init_file_logging_with_size()`, `init_console_logging()`
 - 로그 위치: 실행 파일 경로의 `logs/ardiex.log`
+- 로컬타임 포맷: `%Y-%m-%d %H:%M:%S%.3f`
+- 회전 기준: `max_log_file_size_mb`(글로벌 설정), gzip 압축, 날짜 suffix `%Y-%m-%d_%H-%M-%S`
 
 #### 파일 감시 작업
 
 - 파일: `src/watcher.rs`
-- 함수: `FileWatcher::new()`, `run()`
+- 함수: `FileWatcher::new()`, `debounce_events()`, `should_trigger_backup()`
 - 이벤트 처리: notify의 EventKind
 
 #### CLI 명령어 처리
 
-- 파일: `src/main.rs`
-- 구조: clap의 Parser, Subcommand
+- 파일: `src/main.rs`, `src/cli.rs`, `src/commands/*.rs`
+- 구조: `cli.rs`에서 clap Parser/Subcommand 정의, `commands`에서 실제 처리
 - 명령어: config, backup, restore, run
 - config 하위: init, list, add-source, remove-source, add-backup, remove-backup, set, set-source
-- set: 글로벌 설정 (backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size 등)
+- set: 글로벌 설정 (backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size, max_log_file_size_mb 등)
 - set-source: 소스별 설정 (cron_schedule 포함, "reset"으로 초기화 가능)
 - cron 스케줄러: 소스별 개별 tokio task로 스케줄링, 용량 기반 최소 주기 적용
 - 경로 검증: `ensure_absolute()`로 모든 경로 입력 절대경로 강제
 - 시작 시 검증: `handle_backup()`, `handle_run()`에서 `validate_all_sources()` 호출
+- `run` 시작 시 현재 설정 스냅샷 출력, 실행 중 설정 변경 핫리로드 처리
+
+#### 설정 에디터 작업
+
+- 파일: `src/editor/settings-editor.html`
+- `settings.json` 파일명 강제 + 로드 시 스키마 검증
+- 파일 열기/전체 화면 DnD 지원
+- 열기 전 저장 버튼 비활성화, 열린 파일 핸들 저장 시 덮어쓰기 저장
+- JSON 미리보기 자동 갱신 및 클립보드 복사 버튼 제공
 
 ### 4. 자주 발생하는 작업 패턴
 
@@ -137,7 +162,7 @@ ardiex/
 1. 관련 모듈 확인 (config/backup/watcher)
 2. 필요한 구조체를 config.rs에 추가
 3. JSON 직렬화를 위한 serde derive 매크로 추가
-4. CLI 명령어가 필요하면 main.rs에 Subcommand 추가
+4. CLI 명령어가 필요하면 `src/cli.rs`/`src/commands/*`에 반영
 5. 관련 함수 구현 및 테스트
 
 #### 버그 수정 시

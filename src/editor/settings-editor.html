@@ -484,6 +484,10 @@
         <input type="number" id="g-max-backups" min="1" value="10" />
       </div>
       <div class="field">
+        <label>max_log_file_size_mb</label>
+        <input type="number" id="g-max-log-size" min="1" value="20" />
+      </div>
+      <div class="field">
         <label>backup_mode</label>
         <select id="g-backup-mode">
           <option value="delta">delta</option>
@@ -743,6 +747,7 @@
           enable_event_driven: true,
           exclude_patterns: ["*.tmp", "*.log", ".git/*", ".DS_Store"],
           max_backups: 10,
+          max_log_file_size_mb: 20,
           backup_mode: "delta",
           full_backup_interval: 10,
           cron_schedule: "0 0 * * * *",
@@ -802,6 +807,9 @@
         try {
           const content = await file.text();
           parsed = JSON.parse(content);
+          if (parsed.max_log_file_size_mb == null) {
+            parsed.max_log_file_size_mb = 20;
+          }
         } catch (err) {
           throw new Error("유효한 JSON 형식이 아닙니다.");
         }
@@ -868,6 +876,9 @@
         }
         if (!Number.isInteger(config.max_backups) || config.max_backups < 1) {
           errors.push("max_backups는 1 이상의 정수여야 합니다.");
+        }
+        if (!Number.isInteger(config.max_log_file_size_mb) || config.max_log_file_size_mb < 1) {
+          errors.push("max_log_file_size_mb는 1 이상의 정수여야 합니다.");
         }
         if (!(config.backup_mode === "delta" || config.backup_mode === "copy")) {
           errors.push("backup_mode는 'delta' 또는 'copy'여야 합니다.");
@@ -1032,6 +1043,7 @@
         document.getElementById("g-enable-periodic").checked = c.enable_periodic !== false;
         document.getElementById("g-enable-event").checked = c.enable_event_driven !== false;
         document.getElementById("g-max-backups").value = c.max_backups || 10;
+        document.getElementById("g-max-log-size").value = c.max_log_file_size_mb || 20;
         document.getElementById("g-backup-mode").value = c.backup_mode || "delta";
         document.getElementById("g-full-interval").value = c.full_backup_interval || 10;
         document.getElementById("g-cron").value = c.cron_schedule || "0 0 * * * *";
@@ -1449,6 +1461,7 @@
         currentConfig.enable_periodic = document.getElementById("g-enable-periodic").checked;
         currentConfig.enable_event_driven = document.getElementById("g-enable-event").checked;
         currentConfig.max_backups = parseInt(document.getElementById("g-max-backups").value, 10) || 10;
+        currentConfig.max_log_file_size_mb = parseInt(document.getElementById("g-max-log-size").value, 10) || 20;
         currentConfig.backup_mode = document.getElementById("g-backup-mode").value;
         currentConfig.full_backup_interval = parseInt(document.getElementById("g-full-interval").value, 10) || 10;
         currentConfig.cron_schedule = document.getElementById("g-cron").value;
@@ -1471,6 +1484,7 @@
 
         // Global
         if (config.max_backups < 1) errors.push("글로벌 max_backups는 1 이상이어야 합니다.");
+        if (config.max_log_file_size_mb < 1) errors.push("글로벌 max_log_file_size_mb는 1 이상이어야 합니다.");
         if (config.full_backup_interval < 1) errors.push("글로벌 full_backup_interval은 1 이상이어야 합니다.");
         if (config.backup_mode === "delta" && config.max_backups < config.full_backup_interval) {
           errors.push(
@@ -1589,6 +1603,7 @@
           "g-enable-periodic",
           "g-enable-event",
           "g-max-backups",
+          "g-max-log-size",
           "g-backup-mode",
           "g-full-interval",
           "g-cron",

@@ -15,6 +15,7 @@ use commands::config_cmd::handle_config;
 use commands::backup_cmd::handle_backup;
 use commands::run_cmd::handle_run;
 use commands::restore_cmd::handle_restore;
+use config::ConfigManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,14 +24,25 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .map(|p| p.join("logs"));
+
+    let max_log_file_size_mb = match ConfigManager::load_or_create() {
+        Ok(cm) => cm.get_config().max_log_file_size_mb,
+        Err(e) => {
+            eprintln!(
+                "Failed to read settings for max_log_file_size_mb, using default: {}",
+                e
+            );
+            20
+        }
+    };
     
     if let Some(ref log_dir) = log_dir {
-        if let Err(e) = logger::init_file_logging(log_dir) {
+        if let Err(e) = logger::init_file_logging_with_size(log_dir, max_log_file_size_mb) {
             eprintln!("Failed to initialize file logging: {}", e);
-            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+            logger::init_console_logging();
         }
     } else {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+        logger::init_console_logging();
     }
 
     let cli = Cli::parse();

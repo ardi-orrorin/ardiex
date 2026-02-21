@@ -78,8 +78,9 @@ pub enum ConfigAction {
     ///   full_backup_interval   (number)
     ///   cron_schedule          ("sec min hour day month dow")
     ///   enable_min_interval_by_size  (true/false)
+    ///   max_log_file_size_mb   (number, > 0)
     Set {
-        /// Key: enable_periodic, enable_event_driven, max_backups, backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size
+        /// Key: enable_periodic, enable_event_driven, max_backups, backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size, max_log_file_size_mb
         key: String,
         /// Configuration value
         value: String,

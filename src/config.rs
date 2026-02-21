@@ -34,6 +34,8 @@ pub struct BackupConfig {
     pub cron_schedule: String,
     #[serde(default = "default_true")]
     pub enable_min_interval_by_size: bool,
+    #[serde(default = "default_max_log_file_size_mb")]
+    pub max_log_file_size_mb: u64,
     pub metadata: HashMap<String, SourceMetadata>,
 }
 
@@ -47,6 +49,10 @@ fn default_cron_schedule() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_max_log_file_size_mb() -> u64 {
+    20
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +125,7 @@ impl Default for BackupConfig {
             full_backup_interval: 10,
             cron_schedule: "0 0 * * * *".to_string(),
             enable_min_interval_by_size: true,
+            max_log_file_size_mb: default_max_log_file_size_mb(),
             metadata: HashMap::new(),
         }
     }
