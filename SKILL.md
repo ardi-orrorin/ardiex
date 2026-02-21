@@ -252,10 +252,19 @@ enum ConfigAction {
 }
 
 // 모든 경로 입력은 절대경로 필수 (ensure_absolute() 검증)
-// 프로그램 시작 시 validate_all_sources()로 delta chain + full interval 사전 검증
+// 프로그램 시작 시 validate_all_sources()로 전체 설정 검증:
+//   글로벌 값, 경로 절대/존재/디렉토리, 중복, 소스==백업 금지,
+//   소스별 오버라이드 값, cron 표현식, delta chain, full interval
 ```
 
-### 2. 컬러 출력
+### 3. 설정 파일 웹 편집기
+
+- 위치: `src/editor/settings-editor.html`
+- 단일 HTML 파일 (외부 의존성 없음)
+- settings.json 로드/편집/저장/검증
+- 릴리스 아카이브에 포함
+
+### 4. 컬러 출력
 
 - **녹색**: 성공
 - **노란색**: 경고

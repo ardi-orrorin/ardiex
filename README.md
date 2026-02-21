@@ -17,6 +17,7 @@
 - **주기적 full 강제**: 설정된 inc 횟수마다 자동 full 백업
 - **Delta 체인 검증**: 백업 시작 시 기존 delta 파일 무결성 검증, 손상 시 full 전환
 - **글로벌/소스별 설정**: 소스별 설정이 글로벌 설정을 오버라이드
+- **시작 시 검증**: 프로그램 시작 시 설정 파일 전체 유효성 검사
 
 ### 2. 트리거 방식
 
@@ -89,6 +90,18 @@
   }
 }
 ```
+
+### 시작 시 검증 항목
+
+프로그램 시작(`backup`, `run`) 시 다음 항목을 자동 검증합니다:
+
+- 글로벌 `cron_schedule` 유효성
+- 글로벌 `max_backups > 0`, `full_backup_interval > 0`
+- 소스 중복 여부
+- 소스/백업 경로: 절대경로, 존재 여부, 디렉토리 여부
+- 소스 == 백업 동일 경로 금지, 백업 중복 검사
+- 소스별 오버라이드 값 검증 (`max_backups`, `full_backup_interval`, `cron_schedule`)
+- Delta chain 무결성 검증, `full_backup_interval` 도달 시 full 강제
 
 ### 백업 경로 규칙
 
@@ -332,9 +345,10 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
 ## 모듈 구조
 
 1. **config.rs** - 설정 파일 관리
-2. **backup.rs** - 증분 백업 로직
+2. **backup.rs** - 증분 백업 로직 + 시작 시 검증
 3. **delta.rs** - 블록 단위 delta 백업/복원
 4. **restore.rs** - 백업 복구 관리
 5. **watcher.rs** - 파일 시스템 감시
 6. **logger.rs** - 파일 로깅
 7. **main.rs** - CLI 인터페이스 및 메인 로직
+8. **editor/settings-editor.html** - 설정 파일 웹 편집기

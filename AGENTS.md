@@ -18,13 +18,15 @@ ardiex/
 ├── src/
 │   ├── main.rs          # CLI 엔트리포인트
 │   ├── config.rs        # 설정 파일 관리
-│   ├── backup.rs        # 증분 백업 로직
+│   ├── backup.rs        # 증분 백업 로직 + 시작 시 검증
 │   ├── delta.rs         # 블록 단위 delta 백업/복원
 │   ├── restore.rs       # 백업 복구 관리
 │   ├── watcher.rs       # 파일 시스템 감시
-│   └── logger.rs        # 파일 로깅
+│   ├── logger.rs        # 파일 로깅
+│   └── editor/
+│       └── settings-editor.html  # 설정 파일 웹 편집기
 ├── settings.json        # 실행 시 생성되는 설정 파일
-├── READMD.md            # 프로젝트 명세 및 사용법
+├── README.md            # 프로젝트 명세 및 사용법
 └── skill.md             # 기술 구현 가이드
 ```
 

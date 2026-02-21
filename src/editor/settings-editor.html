@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ardiex Settings Editor</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --surface: #1e293b;
+        --surface2: #334155;
+        --border: #475569;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --primary: #3b82f6;
+        --primary-hover: #2563eb;
+        --danger: #ef4444;
+        --danger-hover: #dc2626;
+        --success: #22c55e;
+        --warning: #f59e0b;
+        --radius: 8px;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      h1 .badge {
+        font-size: 0.7rem;
+        background: var(--primary);
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 500;
+      }
+
+      .subtitle {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        margin-bottom: 24px;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 8px 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        transition: all 0.15s;
+      }
+
+      button:hover {
+        background: var(--surface2);
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        border-color: var(--primary);
+      }
+      .btn-primary:hover {
+        background: var(--primary-hover);
+      }
+
+      .btn-danger {
+        background: var(--danger);
+        border-color: var(--danger);
+      }
+      .btn-danger:hover {
+        background: var(--danger-hover);
+      }
+
+      .btn-sm {
+        padding: 4px 10px;
+        font-size: 0.8rem;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+
+      .card h2 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 16px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .field {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .field label {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      select {
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        color: var(--text);
+        font-size: 0.85rem;
+        width: 100%;
+      }
+
+      input:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+      }
+
+      input.invalid {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+      }
+
+      .checkbox-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--primary);
+      }
+
+      .source-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .source-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .source-header h3 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        word-break: break-all;
+      }
+
+      .source-header .actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .backup-dirs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .backup-dir-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .backup-dir-row input {
+        flex: 1;
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .tag-enabled {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--success);
+      }
+      .tag-disabled {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--danger);
+      }
+
+      .override-row {
+        display: grid;
+        grid-template-columns: 160px 1fr 60px;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+
+      .override-row label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 12px 20px;
+        border-radius: var(--radius);
+        font-size: 0.85rem;
+        font-weight: 500;
+        z-index: 1000;
+        animation: slideIn 0.3s ease;
+        max-width: 400px;
+      }
+
+      .toast-success {
+        background: var(--success);
+        color: #000;
+      }
+      .toast-error {
+        background: var(--danger);
+        color: #fff;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .json-preview {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 400px;
+        overflow-y: auto;
+        color: var(--text-muted);
+        display: none;
+      }
+
+      .section-toggle {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .section-toggle::before {
+        content: "▸ ";
+      }
+
+      .section-toggle.open::before {
+        content: "▾ ";
+      }
+
+      .help-text {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .path-input-group {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .path-input-group input {
+        flex: 1;
+      }
+
+      .btn-browse {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        background: var(--surface2);
+        border-color: var(--border);
+        flex-shrink: 0;
+      }
+
+      .btn-browse:hover {
+        background: var(--primary);
+        border-color: var(--primary);
+      }
+
+      .btn-create {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        background: var(--surface2);
+        border-color: var(--border);
+        flex-shrink: 0;
+      }
+
+      .btn-create:hover {
+        background: var(--success);
+        border-color: var(--success);
+        color: #000;
+      }
+
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 2000;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .modal-overlay.active {
+        display: flex;
+      }
+
+      .modal {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        width: 480px;
+        max-width: 90vw;
+      }
+
+      .modal h3 {
+        font-size: 1rem;
+        margin-bottom: 16px;
+      }
+
+      .modal .field {
+        margin-bottom: 12px;
+      }
+
+      .modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 16px;
+      }
+
+      @media (max-width: 640px) {
+        .field {
+          grid-template-columns: 1fr;
+        }
+        .override-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Ardiex Settings Editor <span class="badge">v0.0.2</span></h1>
+    <p class="subtitle">settings.json 파일을 불러와서 편집하고 저장합니다.</p>
+
+    <div class="toolbar">
+      <button class="btn-primary" onclick="newConfig()">📄 새로 만들기</button>
+      <button class="btn-primary" onclick="loadFile()">📂 파일 열기</button>
+      <button class="btn-primary" onclick="saveFile()">💾 저장</button>
+      <button onclick="downloadFile()">⬇ 다운로드</button>
+      <button onclick="togglePreview()">{ } JSON 미리보기</button>
+      <button onclick="validateConfig()">✓ 검증</button>
+    </div>
+
+    <div id="json-preview" class="json-preview"></div>
+
+    <!-- Global Settings -->
+    <div class="card">
+      <h2>글로벌 설정</h2>
+
+      <div class="field">
+        <label>periodic_interval_minutes</label>
+        <input type="number" id="g-periodic-interval" min="1" value="60" />
+      </div>
+      <div class="field">
+        <label>enable_periodic</label>
+        <div class="checkbox-field">
+          <input type="checkbox" id="g-enable-periodic" checked />
+          <span class="help-text">주기적 백업 활성화</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>enable_event_driven</label>
+        <div class="checkbox-field">
+          <input type="checkbox" id="g-enable-event" checked />
+          <span class="help-text">파일 변경 감지 백업 활성화</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>max_backups</label>
+        <input type="number" id="g-max-backups" min="1" value="10" />
+      </div>
+      <div class="field">
+        <label>backup_mode</label>
+        <select id="g-backup-mode">
+          <option value="delta">delta</option>
+          <option value="copy">copy</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>full_backup_interval</label>
+        <input type="number" id="g-full-interval" min="1" value="10" />
+      </div>
+      <div class="field">
+        <label>cron_schedule</label>
+        <input type="text" id="g-cron" value="0 0 * * * *" />
+      </div>
+      <div class="field">
+        <label>enable_min_interval_by_size</label>
+        <div class="checkbox-field">
+          <input type="checkbox" id="g-min-interval" checked />
+          <span class="help-text">용량 기반 최소 백업 주기</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>exclude_patterns</label>
+        <input type="text" id="g-exclude" value="*.tmp, *.log, .git/*, .DS_Store" />
+      </div>
+      <p class="help-text" style="margin-top: 4px">exclude_patterns: 쉼표로 구분</p>
+    </div>
+
+    <!-- Sources -->
+    <div class="card">
+      <h2 style="display: flex; justify-content: space-between; align-items: center">
+        소스 목록
+        <button class="btn-primary btn-sm" onclick="addSource()">+ 소스 추가</button>
+      </h2>
+      <div id="sources-container"></div>
+    </div>
+
+    <input type="file" id="file-input" accept=".json" style="display: none" onchange="handleFileLoad(event)" />
+
+    <!-- Modal: Browse (manual path input helper) -->
+    <div class="modal-overlay" id="modal-browse">
+      <div class="modal">
+        <h3>📂 폴더 경로 선택</h3>
+        <div class="field" style="grid-template-columns: 1fr">
+          <label>절대경로를 입력하세요</label>
+          <input type="text" id="browse-path" placeholder="/home/user/documents" />
+        </div>
+        <p class="help-text">
+          터미널에서 <code>pwd</code> 또는 <code>realpath .</code> 명령으로 절대경로를 확인할 수 있습니다.
+        </p>
+        <div class="modal-actions">
+          <button onclick="closeModal('modal-browse')">취소</button>
+          <button class="btn-primary" onclick="confirmBrowse()">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentConfig = null;
+      let fileHandle = null;
+
+      function getDefaultConfig() {
+        return {
+          sources: [],
+          periodic_interval_minutes: 60,
+          enable_periodic: true,
+          enable_event_driven: true,
+          exclude_patterns: ["*.tmp", "*.log", ".git/*", ".DS_Store"],
+          max_backups: 10,
+          backup_mode: "delta",
+          full_backup_interval: 10,
+          cron_schedule: "0 0 * * * *",
+          enable_min_interval_by_size: true,
+          metadata: {}
+        };
+      }
+
+      function loadFile() {
+        document.getElementById("file-input").click();
+      }
+
+      function handleFileLoad(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            currentConfig = JSON.parse(e.target.result);
+            populateUI();
+            toast("설정 파일을 불러왔습니다.", "success");
+          } catch (err) {
+            toast("JSON 파싱 실패: " + err.message, "error");
+          }
+        };
+        reader.readAsText(file);
+        event.target.value = "";
+      }
+
+      function populateUI() {
+        const c = currentConfig;
+        document.getElementById("g-periodic-interval").value = c.periodic_interval_minutes || 60;
+        document.getElementById("g-enable-periodic").checked = c.enable_periodic !== false;
+        document.getElementById("g-enable-event").checked = c.enable_event_driven !== false;
+        document.getElementById("g-max-backups").value = c.max_backups || 10;
+        document.getElementById("g-backup-mode").value = c.backup_mode || "delta";
+        document.getElementById("g-full-interval").value = c.full_backup_interval || 10;
+        document.getElementById("g-cron").value = c.cron_schedule || "0 0 * * * *";
+        document.getElementById("g-min-interval").checked = c.enable_min_interval_by_size !== false;
+        document.getElementById("g-exclude").value = (c.exclude_patterns || []).join(", ");
+
+        renderSources();
+      }
+
+      function renderSources() {
+        const container = document.getElementById("sources-container");
+        container.innerHTML = "";
+
+        if (!currentConfig || !currentConfig.sources) return;
+
+        currentConfig.sources.forEach((src, idx) => {
+          const card = document.createElement("div");
+          card.className = "source-card";
+          card.innerHTML = `
+      <div class="source-header">
+        <h3>
+          <span class="tag ${src.enabled ? "tag-enabled" : "tag-disabled"}">${src.enabled ? "ON" : "OFF"}</span>
+          ${escHtml(src.source_dir)}
+        </h3>
+        <div class="actions">
+          <button class="btn-sm" onclick="toggleSource(${idx})">${src.enabled ? "비활성화" : "활성화"}</button>
+          <button class="btn-sm btn-danger" onclick="removeSource(${idx})">삭제</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>source_dir</label>
+        <div class="path-input-group">
+          <input type="text" id="source-dir-${idx}" value="${escAttr(src.source_dir)}" onchange="updateSourceField(${idx}, 'source_dir', this.value)">
+          <button class="btn-browse btn-sm" onclick="openBrowse('source', ${idx})">📂 찾기</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>backup_dirs</label>
+        <div class="backup-dirs" id="backup-dirs-${idx}">
+          ${(src.backup_dirs || [])
+            .map(
+              (bd, bi) => `
+            <div class="backup-dir-row">
+              <div class="path-input-group">
+                <input type="text" value="${escAttr(bd)}" onchange="updateBackupDir(${idx}, ${bi}, this.value)">
+                <button class="btn-browse btn-sm" onclick="openBrowse('backup', ${idx}, ${bi})">📂 찾기</button>
+                <button class="btn-sm btn-danger" onclick="removeBackupDir(${idx}, ${bi})">✕</button>
+              </div>
+            </div>
+          `
+            )
+            .join("")}
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <button class="btn-sm" onclick="addBackupDir(${idx})">+ 직접 입력</button>
+            <button class="btn-sm btn-browse" onclick="openBrowse('backup-new', ${idx})">📂 찾기로 추가</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <h4 class="section-toggle${hasOverrides(src) ? " open" : ""}" onclick="toggleOverrides(this)">소스별 설정 오버라이드</h4>
+        <div class="overrides" style="margin-top:8px;${hasOverrides(src) ? "" : "display:none;"}">
+          <div class="override-row">
+            <label>exclude_patterns</label>
+            <input type="text" value="${src.exclude_patterns ? src.exclude_patterns.join(", ") : ""}"
+              placeholder="글로벌 설정 사용"
+              onchange="updateSourceOverride(${idx}, 'exclude_patterns', this.value)">
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'exclude_patterns', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>max_backups</label>
+            <input type="number" min="1" value="${src.max_backups != null ? src.max_backups : ""}"
+              placeholder="글로벌 설정 사용"
+              onchange="updateSourceOverride(${idx}, 'max_backups', this.value)">
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'max_backups', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>backup_mode</label>
+            <select onchange="updateSourceOverride(${idx}, 'backup_mode', this.value)">
+              <option value="" ${src.backup_mode == null ? "selected" : ""}>글로벌 설정 사용</option>
+              <option value="delta" ${src.backup_mode === "delta" ? "selected" : ""}>delta</option>
+              <option value="copy" ${src.backup_mode === "copy" ? "selected" : ""}>copy</option>
+            </select>
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'backup_mode', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>full_backup_interval</label>
+            <input type="number" min="1" value="${src.full_backup_interval != null ? src.full_backup_interval : ""}"
+              placeholder="글로벌 설정 사용"
+              onchange="updateSourceOverride(${idx}, 'full_backup_interval', this.value)">
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'full_backup_interval', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>cron_schedule</label>
+            <input type="text" value="${src.cron_schedule || ""}"
+              placeholder="글로벌 설정 사용"
+              onchange="updateSourceOverride(${idx}, 'cron_schedule', this.value)">
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'cron_schedule', this)">reset</button>
+          </div>
+        </div>
+      </div>
+    `;
+          container.appendChild(card);
+        });
+      }
+
+      function hasOverrides(src) {
+        return (
+          src.exclude_patterns != null ||
+          src.max_backups != null ||
+          src.backup_mode != null ||
+          src.full_backup_interval != null ||
+          src.cron_schedule != null
+        );
+      }
+
+      function toggleOverrides(el) {
+        el.classList.toggle("open");
+        const div = el.nextElementSibling;
+        div.style.display = div.style.display === "none" ? "" : "none";
+      }
+
+      // ── Modal state ──
+      let modalTarget = { type: "", sourceIdx: -1, backupIdx: -1 };
+
+      function openBrowse(type, sourceIdx, backupIdx) {
+        modalTarget = { type, sourceIdx, backupIdx: backupIdx != null ? backupIdx : -1 };
+        document.getElementById("browse-path").value = "";
+        // Pre-fill with current value
+        if (type === "source") {
+          document.getElementById("browse-path").value = currentConfig.sources[sourceIdx].source_dir || "";
+        } else if (type === "backup" && backupIdx != null) {
+          document.getElementById("browse-path").value = currentConfig.sources[sourceIdx].backup_dirs[backupIdx] || "";
+        }
+        document.getElementById("modal-browse").classList.add("active");
+        setTimeout(() => document.getElementById("browse-path").focus(), 100);
+      }
+
+      function confirmBrowse() {
+        const path = document.getElementById("browse-path").value.trim();
+        if (!path) {
+          toast("경로를 입력하세요.", "error");
+          return;
+        }
+        if (!path.startsWith("/")) {
+          toast("절대경로를 입력하세요. (/ 로 시작)", "error");
+          return;
+        }
+
+        applyPath(path);
+        closeModal("modal-browse");
+      }
+
+      function applyPath(path) {
+        const { type, sourceIdx, backupIdx } = modalTarget;
+        if (type === "source") {
+          currentConfig.sources[sourceIdx].source_dir = path;
+        } else if (type === "backup") {
+          currentConfig.sources[sourceIdx].backup_dirs[backupIdx] = path;
+        } else if (type === "backup-new") {
+          currentConfig.sources[sourceIdx].backup_dirs.push(path);
+        }
+        renderSources();
+      }
+
+      function closeModal(id) {
+        document.getElementById(id).classList.remove("active");
+      }
+
+      // Close modals on Escape key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          document.querySelectorAll(".modal-overlay.active").forEach((m) => m.classList.remove("active"));
+        }
+      });
+
+      // Close modals on overlay click
+      document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+        overlay.addEventListener("click", (e) => {
+          if (e.target === overlay) overlay.classList.remove("active");
+        });
+      });
+
+      function addSource() {
+        if (!currentConfig) currentConfig = getDefaultConfig();
+        currentConfig.sources.push({
+          source_dir: "/path/to/source",
+          backup_dirs: ["/path/to/backup"],
+          enabled: true
+        });
+        renderSources();
+      }
+
+      function removeSource(idx) {
+        if (confirm(`소스 "${currentConfig.sources[idx].source_dir}"를 삭제하시겠습니까?`)) {
+          currentConfig.sources.splice(idx, 1);
+          renderSources();
+        }
+      }
+
+      function toggleSource(idx) {
+        currentConfig.sources[idx].enabled = !currentConfig.sources[idx].enabled;
+        renderSources();
+      }
+
+      function updateSourceField(idx, field, value) {
+        currentConfig.sources[idx][field] = value;
+      }
+
+      function updateBackupDir(idx, bi, value) {
+        currentConfig.sources[idx].backup_dirs[bi] = value;
+      }
+
+      function addBackupDir(idx) {
+        currentConfig.sources[idx].backup_dirs.push("/path/to/backup");
+        renderSources();
+      }
+
+      function removeBackupDir(idx, bi) {
+        currentConfig.sources[idx].backup_dirs.splice(bi, 1);
+        renderSources();
+      }
+
+      function updateSourceOverride(idx, key, value) {
+        const src = currentConfig.sources[idx];
+        if (value === "" || value == null) {
+          delete src[key];
+          return;
+        }
+        if (key === "exclude_patterns") {
+          src[key] = value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s);
+        } else if (key === "max_backups" || key === "full_backup_interval") {
+          src[key] = parseInt(value, 10);
+        } else {
+          src[key] = value;
+        }
+      }
+
+      function resetOverride(idx, key, btn) {
+        delete currentConfig.sources[idx][key];
+        renderSources();
+      }
+
+      function collectConfig() {
+        if (!currentConfig) currentConfig = getDefaultConfig();
+
+        currentConfig.periodic_interval_minutes =
+          parseInt(document.getElementById("g-periodic-interval").value, 10) || 60;
+        currentConfig.enable_periodic = document.getElementById("g-enable-periodic").checked;
+        currentConfig.enable_event_driven = document.getElementById("g-enable-event").checked;
+        currentConfig.max_backups = parseInt(document.getElementById("g-max-backups").value, 10) || 10;
+        currentConfig.backup_mode = document.getElementById("g-backup-mode").value;
+        currentConfig.full_backup_interval = parseInt(document.getElementById("g-full-interval").value, 10) || 10;
+        currentConfig.cron_schedule = document.getElementById("g-cron").value;
+        currentConfig.enable_min_interval_by_size = document.getElementById("g-min-interval").checked;
+
+        const excludeStr = document.getElementById("g-exclude").value;
+        currentConfig.exclude_patterns = excludeStr
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s);
+
+        if (!currentConfig.metadata) currentConfig.metadata = {};
+
+        return currentConfig;
+      }
+
+      function validateConfig() {
+        const config = collectConfig();
+        const errors = [];
+
+        // Global
+        if (config.max_backups < 1) errors.push("글로벌 max_backups는 1 이상이어야 합니다.");
+        if (config.full_backup_interval < 1) errors.push("글로벌 full_backup_interval은 1 이상이어야 합니다.");
+        if (!config.cron_schedule || config.cron_schedule.trim().split(/\s+/).length < 6) {
+          errors.push("글로벌 cron_schedule이 유효하지 않습니다. (최소 6필드: 초 분 시 일 월 요일)");
+        }
+
+        const seenSources = new Set();
+        for (let i = 0; i < config.sources.length; i++) {
+          const src = config.sources[i];
+          const label = `소스[${i}] "${src.source_dir}"`;
+
+          // Absolute path
+          if (!src.source_dir.startsWith("/")) {
+            errors.push(`${label}: source_dir은 절대경로여야 합니다.`);
+          }
+
+          // Duplicate source
+          if (seenSources.has(src.source_dir)) {
+            errors.push(`${label}: 중복된 소스 디렉토리입니다.`);
+          }
+          seenSources.add(src.source_dir);
+
+          // Backup dirs
+          const seenBackups = new Set();
+          for (let j = 0; j < (src.backup_dirs || []).length; j++) {
+            const bd = src.backup_dirs[j];
+            if (!bd.startsWith("/")) {
+              errors.push(`${label}: backup_dirs[${j}]은 절대경로여야 합니다.`);
+            }
+            if (bd === src.source_dir) {
+              errors.push(`${label}: backup_dirs[${j}]이 소스와 동일합니다.`);
+            }
+            if (seenBackups.has(bd)) {
+              errors.push(`${label}: backup_dirs[${j}] 중복된 백업 경로입니다.`);
+            }
+            seenBackups.add(bd);
+          }
+
+          // Source overrides
+          if (src.max_backups != null && src.max_backups < 1) {
+            errors.push(`${label}: max_backups는 1 이상이어야 합니다.`);
+          }
+          if (src.full_backup_interval != null && src.full_backup_interval < 1) {
+            errors.push(`${label}: full_backup_interval은 1 이상이어야 합니다.`);
+          }
+          if (src.cron_schedule && src.cron_schedule.trim().split(/\s+/).length < 6) {
+            errors.push(`${label}: cron_schedule이 유효하지 않습니다.`);
+          }
+        }
+
+        if (errors.length === 0) {
+          toast("검증 통과! 모든 설정이 유효합니다.", "success");
+        } else {
+          toast(`검증 실패: ${errors.length}개 오류\n` + errors.join("\n"), "error");
+        }
+        return errors.length === 0;
+      }
+
+      function togglePreview() {
+        const el = document.getElementById("json-preview");
+        if (el.style.display === "none" || !el.style.display) {
+          const config = collectConfig();
+          // Clean up undefined/null optional fields for display
+          const cleaned = JSON.parse(
+            JSON.stringify(config, (key, value) => {
+              if (value === null || value === undefined) return undefined;
+              return value;
+            })
+          );
+          el.textContent = JSON.stringify(cleaned, null, 2);
+          el.style.display = "block";
+        } else {
+          el.style.display = "none";
+        }
+      }
+
+      function saveFile() {
+        const config = collectConfig();
+        if (!validateConfig()) return;
+
+        // Use File System Access API if available
+        if ("showSaveFilePicker" in window) {
+          saveWithFSAPI(config);
+        } else {
+          downloadFile();
+        }
+      }
+
+      async function saveWithFSAPI(config) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: "settings.json",
+            types: [
+              {
+                description: "JSON Files",
+                accept: { "application/json": [".json"] }
+              }
+            ]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(JSON.stringify(config, null, 2));
+          await writable.close();
+          toast("파일이 저장되었습니다.", "success");
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            toast("저장 실패: " + err.message, "error");
+          }
+        }
+      }
+
+      function downloadFile() {
+        const config = collectConfig();
+        const json = JSON.stringify(config, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "settings.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        toast("다운로드가 시작되었습니다.", "success");
+      }
+
+      function toast(msg, type) {
+        const existing = document.querySelector(".toast");
+        if (existing) existing.remove();
+
+        const el = document.createElement("div");
+        el.className = `toast toast-${type}`;
+        el.style.whiteSpace = "pre-wrap";
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), type === "error" ? 6000 : 3000);
+      }
+
+      function escHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s || "";
+        return d.innerHTML;
+      }
+
+      function escAttr(s) {
+        return (s || "").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function newConfig() {
+        if (currentConfig && currentConfig.sources.length > 0) {
+          if (!confirm("현재 설정을 초기화하시겠습니까? 저장하지 않은 변경사항은 사라집니다.")) return;
+        }
+        currentConfig = getDefaultConfig();
+        populateUI();
+        toast("새 설정이 생성되었습니다.", "success");
+      }
+
+      // Init with empty state
+      currentConfig = getDefaultConfig();
+      populateUI();
+    </script>
+  </body>
+</html>
