@@ -278,7 +278,29 @@ env_logger = "0.10"
 anyhow = "1.0"
 sha2 = "0.10"
 file-rotate = "0.7"
+walkdir = "2.5"
 ```
+
+## Release 프로필 최적화
+
+```toml
+[profile.release]
+lto = "fat"            # 전체 LTO로 크로스 크레이트 최적화 극대화
+codegen-units = 1      # 단일 코드 생성 단위로 최적화 극대화
+panic = "abort"        # unwinding 코드 제거, 바이너리 축소
+strip = true           # 디버그 심볼 제거
+opt-level = 3          # 최대 성능 최적화
+overflow-checks = false  # 오버플로 검사 제거로 성능 향상
+```
+
+| 설정              | 값        | 효과                                |
+| ----------------- | --------- | ----------------------------------- |
+| `lto`             | `"fat"`   | 전체 LTO로 최대 바이너리 최적화     |
+| `codegen-units`   | `1`       | 단일 코드 생성 단위로 최적화 극대화 |
+| `panic`           | `"abort"` | unwinding 코드 제거, 바이너리 축소  |
+| `strip`           | `true`    | 디버그 심볼 제거                    |
+| `opt-level`       | `3`       | 최대 성능 최적화                    |
+| `overflow-checks` | `false`   | 오버플로 검사 제거로 성능 향상      |
 
 ## 모듈 구조
 
