@@ -393,11 +393,15 @@ impl BackupManager {
                                 );
                                 delta::save_delta(&delta_data, &delta_file_path)?;
                                 bytes_processed += delta_bytes as u64;
-                                info!("Delta backup: {:?} ({} bytes delta vs {} bytes full)",
-                                    relative_path, delta_bytes, file_size);
+                                info!("Delta backup: {:?} ({} bytes delta vs {} bytes full, {}/{} blocks changed)",
+                                    relative_path, delta_bytes, file_size,
+                                    delta_data.changed_blocks.len(), delta_data.total_blocks);
                             } else {
                                 fs::copy(file_path, &backup_file_path)?;
                                 bytes_processed += file_size;
+                                info!("Full copy (delta not efficient): {:?} ({} bytes, {}/{} blocks changed)",
+                                    relative_path, file_size,
+                                    delta_data.changed_blocks.len(), delta_data.total_blocks);
                             }
                         } else {
                             fs::copy(file_path, &backup_file_path)?;

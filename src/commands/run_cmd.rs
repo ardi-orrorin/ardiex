@@ -105,10 +105,11 @@ pub async fn handle_run() -> Result<()> {
 
         Some(tokio::task::spawn_blocking(move || {
             match FileWatcher::new(watch_paths, backup_tx.clone(), Duration::from_millis(300)) {
-                Ok(_) => {
+                Ok(_watcher) => {
                     info!("File watcher started");
+                    // Keep _watcher alive — dropping it stops file watching
                     loop {
-                        let _ = sleep(Duration::from_secs(1));
+                        std::thread::sleep(Duration::from_secs(1));
                     }
                 }
                 Err(e) => {
