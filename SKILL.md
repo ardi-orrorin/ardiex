@@ -1,0 +1,263 @@
+---
+name: ardiex
+description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 기반 백업, 다중 소스/백업 경로, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, JSON 설정 파일, 파일 시스템 감시(notify), Tokio 비동기 처리가 필요한 작업에 사용.
+---
+
+# Ardiex 백업 프로그램 기술 명세
+
+## 핵심 기술 스택
+
+### 1. Rust 비동기 프로그래밍
+
+- **Tokio**: 비동기 런타임으로 주기적 타이머 및 이벤트 처리
+- **Async/Await**: 동시성 처리 (백업 실행, 파일 감시, CLI 처리)
+
+### 2. 파일 시스템 감시
+
+- **notify crate**: 크로스플랫폼 파일 시스템 이벤트 감지
+- **이벤트 종류**: Create, Modify, Remove, Rename
+- **디바운싱**: 연속적인 파일 변경에 대한 중복 백업 방지
+
+### 3. 증분 백업 알고리즘
+
+```rust
+// 핵심 로직
+fn calculate_file_hash(path: &Path) -> Result<String>
+fn detect_changed_files(source: &Path, metadata: &Metadata) -> Result<Vec<PathBuf>>
+fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: Vec<PathBuf>) -> Result<()>
+```
+
+### 4. 블록 단위 Delta 백업
+
+- **블록 크기**: 4KB 단위로 파일 분할
+- **블록 해시 비교**: 이전 백업과 현재 파일의 각 블록 SHA-256 해시 비교
+- **자동 판단**: delta 크기가 원본의 50% 미만이면 delta 저장, 아니면 전체 복사
+- **복원**: 원본 파일 + delta 블록 병합으로 복원
+
+### 4-1. 백업 모드 (delta / copy)
+
+- **delta 모드**: 블록 단위 diff 백업, 주기적 + 실시간 지원
+- **copy 모드**: 변경 파일 전체 복사, 주기적 백업만 지원 (실시간 비활성화)
+- **글로벌/소스별 설정**: 소스별 설정이 글로벌 오버라이드
+
+### 4-2. Delta 체인 무결성 검증
+
+- 백업 시작 시 기존 inc 디렉토리의 .delta 파일을 모두 로드 검증
+- 손상 감지 시 자동으로 full 백업으로 전환
+- `full_backup_interval` 도달 시에도 full 강제
+
+### 4-3. 진행률 로깅
+
+- 백업/복구 시 10% 단위로 진행률 로그 기록
+- 파일 수 기반 비율 계산
+
+```rust
+// delta.rs 핵심 함수
+pub fn create_delta(original: &Path, new: &Path) -> Result<DeltaFile>
+pub fn apply_delta(original: &Path, delta: &DeltaFile, output: &Path) -> Result<()>
+pub fn save_delta(delta: &DeltaFile, path: &Path) -> Result<()>
+pub fn load_delta(path: &Path) -> Result<DeltaFile>
+```
+
+### 5. 백업 복구
+
+- **타임스탬프**: ms 단위 (`%Y%m%d_%H%M%S%3f`)
+- **복구 시 진행률 로깅**: 백업 단위 + 파일 단위 10% 로깅
+
+- **시점별 복구**: full 백업 + inc 백업들을 시간순으로 적용
+- **Delta 복원**: .delta 파일을 이전 복원 파일에 적용
+- **백업 목록 조회**: 사용 가능한 복원 시점 확인
+
+```rust
+// restore.rs 핵심 함수
+pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupEntry>>
+pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -> Result<usize>
+```
+
+### 6. 파일 로깅
+
+- **로그 위치**: 실행 파일 경로의 `logs/ardiex.log`
+- **기록 내용**: 백업 시작/완료, 복구, 에러, delta 정보
+
+### 7. SHA-256 해시 계산
+
+- **std::fs::File**: 파일 읽기
+- **sha2::Sha256**: 해시 계산
+- **std::io::Read**: 스트림으로 대용량 파일 처리
+
+### 8. JSON 설정 관리
+
+- **serde**: 직렬화/역직렬화
+- **serde_json**: JSON 파일 입출력
+- **실행 파일 경로**: std::env::current_exe()로 설정 파일 위치 결정
+- **글로벌/소스별 설정**: `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
+- **소스별 설정 필드**: `Option<T>`로 선언, `#[serde(default, skip_serializing_if = "Option::is_none")]`
+
+## 구현 패턴
+
+### 1. 설정 관리 패턴
+
+```rust
+pub struct ConfigManager {
+    config_path: PathBuf,
+    config: BackupConfig,
+}
+
+impl ConfigManager {
+    pub fn load_or_create() -> Result<Self>
+    pub fn save(&mut self) -> Result<()>
+    pub fn add_source(&mut self, source: SourceConfig) -> Result<()>
+    pub fn remove_source(&mut self, source_path: &str) -> Result<()>
+}
+```
+
+### 2. 백업 관리자 패턴
+
+```rust
+pub struct BackupManager {
+    config: BackupConfig,
+}
+
+impl BackupManager {
+    pub async fn backup_all_sources(&self) -> Result<Vec<BackupResult>>
+    async fn backup_source(source, backup_dirs, resolved: ResolvedSourceConfig) -> Result<Vec<BackupResult>>
+    async fn perform_backup_to_dir(source, backup, exclude, max, mode, interval) -> Result<BackupResult>
+    fn count_inc_since_last_full(backup_dir: &Path) -> usize
+    fn validate_delta_chain(backup_dir: &Path) -> bool
+    fn find_latest_backup_file(backup_dir: &Path, relative: &Path) -> Option<PathBuf>
+}
+```
+
+### 3. 파일 감시자 패턴
+
+```rust
+pub struct FileWatcher {
+    _watchers: Vec<RecommendedWatcher>,
+    _backup_tx: tokio_mpsc::Sender<()>,
+}
+
+impl FileWatcher {
+    pub fn new(paths: Vec<PathBuf>, backup_tx: Sender<()>, debounce: Duration) -> Result<Self>
+    fn debounce_events(rx: Receiver<Event>, backup_tx: Sender<()>, debounce: Duration)
+    fn should_trigger_backup(event: &Event) -> bool
+}
+```
+
+### 4. 복구 관리자 패턴
+
+```rust
+pub struct RestoreManager;
+
+impl RestoreManager {
+    pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupEntry>>
+    pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -> Result<usize>
+    fn select_backups(backups: &[BackupEntry], point: Option<&str>) -> Result<Vec<&BackupEntry>>
+    fn apply_backup(backup: &BackupEntry, target: &Path, backup_root: &Path) -> Result<usize>
+}
+```
+
+## 에러 처리 전략
+
+### 1. anyhow 사용
+
+- 컨텍스트 정보 포함한 에러 체인
+- Result<T> 타입으로 에러 전파
+
+### 2. 주요 에러 케이스
+
+- 파일 접근 권한 없음
+- 디스크 공간 부족
+- 네트워크 백업 경로 연결 실패
+- 설정 파일 손상
+
+## 로깅 전략
+
+### 1. 로그 레벨
+
+- **ERROR**: 치명적인 오류 (백업 실패, 설정 오류)
+- **WARN**: 경고 (일부 파일 백업 실패)
+- **INFO**: 일반 정보 (백업 시작/완료, 설정 변경)
+- **DEBUG**: 디버그 (개별 파일 처리, 이벤트 감지)
+
+### 2. 로그 포맷
+
+```rust
+// 예시
+INFO [2024-02-21 10:00:00] Starting backup for source: ./documents
+WARN [2024-02-21 10:00:05] Failed to backup file: ./documents/locked.tmp (Permission denied)
+ERROR [2024-02-21 10:00:10] Backup failed: Insufficient disk space
+```
+
+## 성능 최적화
+
+### 1. 병렬 처리
+
+- 여러 소스 동시 백업 (tokio::join!)
+- 대용량 파일 스트리밍 처리
+
+### 2. 메모리 관리
+
+- 큰 파일은 chunk 단위로 읽기
+- 해시 계산 시 스트림 사용
+
+### 3. 디바운싱
+
+- 파일 변경 이벤트 300ms 딜레이
+- 중복 백업 요청 방지
+
+## CLI 디자인 패턴
+
+### 1. clap 사용
+
+```rust
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+    Backup,
+    Restore { backup_dir, target_dir, point, list },
+    Run,
+}
+
+enum ConfigAction {
+    Init, List, AddSource, RemoveSource,
+    AddBackup, RemoveBackup,
+    Set { key, value },           // 글로벌 설정
+    SetSource { source, key, value },  // 소스별 설정
+}
+```
+
+### 2. 컬러 출력
+
+- **녹색**: 성공
+- **노란색**: 경고
+- **빨간색**: 오류
+- **파란색**: 정보
+
+## 테스트 전략
+
+### 1. 단위 테스트
+
+- 해시 계산 함수
+- 설정 직렬화/역직렬화
+- 파일 패턴 매칭
+
+### 2. 통합 테스트
+
+- 전체 백업 흐름
+- CLI 명령어 실행
+- 설정 파일 조작
+
+### 3. 테스트 유틸리티
+
+- 임시 디렉토리 생성
+- 모의 파일 시스템
+- 가짜 파일 이벤트 생성
