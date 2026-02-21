@@ -107,6 +107,7 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - **글로벌/소스별 설정**: `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - **소스별 설정 필드**: `Option<T>`로 선언, `#[serde(default, skip_serializing_if = "Option::is_none")]`
 - **cron_schedule**: 글로벌 + 소스별 오버라이드, `cron::Schedule::from_str()`로 검증
+- **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
 
 ## 구현 패턴
 

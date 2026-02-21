@@ -326,6 +326,20 @@ impl BackupManager {
             backup_type = BackupType::Full;
         }
 
+        // Skip incremental backup if no files changed
+        if matches!(backup_type, BackupType::Incremental) && files_to_backup.is_empty() {
+            info!("[{:?}] No changes detected, skipping incremental backup", backup_dir);
+            return Ok(BackupResult {
+                source_dir: source_dir.to_path_buf(),
+                backup_dir: backup_dir.to_path_buf(),
+                backup_type,
+                files_backed_up: 0,
+                total_files: 0,
+                bytes_processed: 0,
+                duration_ms: start_time.elapsed().as_millis() as u64,
+            });
+        }
+
         // Copy mode: always use file copy (no delta)
         let use_delta = matches!(backup_mode, BackupMode::Delta) && matches!(backup_type, BackupType::Incremental);
 
@@ -427,7 +441,7 @@ impl BackupManager {
         let metadata_content = serde_json::to_string_pretty(&metadata)?;
         fs::write(&metadata_path, metadata_content)?;
 
-        Self::cleanup_old_backups(backup_dir, max_backups)?;
+        Self::cleanup_old_backups(backup_dir, max_backups, backup_mode)?;
 
         let duration = start_time.elapsed();
 
@@ -578,7 +592,7 @@ impl BackupManager {
         None
     }
 
-    fn cleanup_old_backups(backup_dir: &Path, max_backups: usize) -> Result<()> {
+    fn cleanup_old_backups(backup_dir: &Path, max_backups: usize, backup_mode: &BackupMode) -> Result<()> {
         let mut backups: Vec<_> = fs::read_dir(backup_dir)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
@@ -594,18 +608,48 @@ impl BackupManager {
             a_time.cmp(&b_time)
         });
 
-        if backups.len() > max_backups {
-            let to_remove = backups.len() - max_backups;
-            for old_backup in backups.iter().take(to_remove) {
-                let path = old_backup.path();
-                if path.is_dir() {
-                    if let Err(e) = fs::remove_dir_all(&path) {
-                        warn!("Failed to remove old backup {:?}: {}", path, e);
-                    } else {
-                        info!("Removed old backup: {:?}", path);
-                    }
+        if backups.len() <= max_backups {
+            return Ok(());
+        }
+
+        // In delta mode, protect the restore chain: latest full + all inc after it
+        let keep_count = if matches!(backup_mode, BackupMode::Delta) {
+            let latest_full_idx = backups.iter().rposition(|entry| {
+                entry.file_name().to_string_lossy().starts_with("full_")
+            });
+
+            let protect_count = match latest_full_idx {
+                Some(idx) => backups.len() - idx,
+                None => backups.len(), // no full backup exists, keep everything
+            };
+
+            max_backups.max(protect_count)
+        } else {
+            // Copy mode: each backup is independent, no chain protection needed
+            max_backups
+        };
+
+        if backups.len() <= keep_count {
+            return Ok(());
+        }
+
+        let to_remove = backups.len() - keep_count;
+        for old_backup in backups.iter().take(to_remove) {
+            let path = old_backup.path();
+            if path.is_dir() {
+                if let Err(e) = fs::remove_dir_all(&path) {
+                    warn!("Failed to remove old backup {:?}: {}", path, e);
+                } else {
+                    info!("Removed old backup: {:?}", path);
                 }
             }
+        }
+
+        if keep_count > max_backups {
+            warn!(
+                "Keeping {} backups (> max_backups={}) to preserve delta restore chain",
+                keep_count, max_backups
+            );
         }
 
         Ok(())

@@ -22,7 +22,6 @@ impl Default for BackupMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupConfig {
     pub sources: Vec<SourceConfig>,
-    pub periodic_interval_minutes: u64,
     pub enable_periodic: bool,
     pub enable_event_driven: bool,
     pub exclude_patterns: Vec<String>,
@@ -65,6 +64,10 @@ pub struct SourceConfig {
     pub full_backup_interval: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cron_schedule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_event_driven: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_periodic: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,8 @@ pub struct ResolvedSourceConfig {
     pub backup_mode: BackupMode,
     pub full_backup_interval: usize,
     pub cron_schedule: String,
+    pub enable_event_driven: bool,
+    pub enable_periodic: bool,
 }
 
 impl SourceConfig {
@@ -84,6 +89,8 @@ impl SourceConfig {
             backup_mode: self.backup_mode.clone().unwrap_or_else(|| global.backup_mode.clone()),
             full_backup_interval: self.full_backup_interval.unwrap_or(global.full_backup_interval),
             cron_schedule: self.cron_schedule.clone().unwrap_or_else(|| global.cron_schedule.clone()),
+            enable_event_driven: self.enable_event_driven.unwrap_or(global.enable_event_driven),
+            enable_periodic: self.enable_periodic.unwrap_or(global.enable_periodic),
         }
     }
 }
@@ -99,7 +106,6 @@ impl Default for BackupConfig {
     fn default() -> Self {
         Self {
             sources: vec![],
-            periodic_interval_minutes: 60,
             enable_periodic: true,
             enable_event_driven: true,
             exclude_patterns: vec![
@@ -177,6 +183,8 @@ impl ConfigManager {
             backup_mode: None,
             full_backup_interval: None,
             cron_schedule: None,
+            enable_event_driven: None,
+            enable_periodic: None,
         };
 
         if let Some(existing) = self.config.sources.iter_mut()

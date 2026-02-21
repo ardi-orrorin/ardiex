@@ -38,7 +38,45 @@
 
 ### 4. Cron 스케줄링
 
-[crontab.guru](https://crontab.guru) 참고
+Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
+
+```
+┌──────── 초 (0-59)
+│ ┌────── 분 (0-59)
+│ │ ┌──── 시 (0-23)
+│ │ │ ┌── 일 (1-31)
+│ │ │ │ ┌ 월 (1-12)
+│ │ │ │ │ ┌ 요일 (0-6, 0=일요일)
+│ │ │ │ │ │
+* * * * * *
+```
+
+#### 자주 쓰는 예시
+
+| 표현식           | 설명               |
+| ---------------- | ------------------ |
+| `0 0 * * * *`    | 매시 정각 (기본값) |
+| `0 */30 * * * *` | 30분마다           |
+| `0 */5 * * * *`  | 5분마다            |
+| `0 0 */2 * * *`  | 2시간마다          |
+| `0 0 9 * * *`    | 매일 오전 9시      |
+| `0 0 0 * * *`    | 매일 자정          |
+| `0 0 9 * * 1-5`  | 평일 오전 9시      |
+| `0 0 0 * * 0`    | 매주 일요일 자정   |
+| `0 0 0 1 * *`    | 매월 1일 자정      |
+
+#### 특수 문자
+
+| 문자  | 의미    | 예시                             |
+| ----- | ------- | -------------------------------- |
+| `*`   | 모든 값 | `* * * * * *` (매초)             |
+| `*/N` | N 간격  | `*/10 * * * * *` (10초마다)      |
+| `N-M` | 범위    | `0 0 9-17 * * *` (9시~17시 매시) |
+| `N,M` | 목록    | `0 0,30 * * * *` (0분, 30분)     |
+
+> **참고**: 일반 crontab은 5필드(분부터)이지만, Ardiex는 **초 필드가 맨 앞에** 추가됩니다.
+>
+> 5필드 표현식 확인: [crontab.guru](https://crontab.guru) (앞에 `0 ` 추가하여 사용)
 
 ## 설정 파일 (settings.json)
 
@@ -61,7 +99,9 @@
       "max_backups": 5,
       "backup_mode": "copy",
       "full_backup_interval": 3,
-      "cron_schedule": "0 */5 * * * *"
+      "cron_schedule": "0 */5 * * * *",
+      "enable_event_driven": false,
+      "enable_periodic": true
     },
     {
       "source_dir": "/home/user/photos",
@@ -69,7 +109,6 @@
       "enabled": true
     }
   ],
-  "periodic_interval_minutes": 60,
   "enable_periodic": true,
   "enable_event_driven": true,
   "exclude_patterns": ["*.tmp", "*.log", ".git/*"],
@@ -186,7 +225,6 @@ cargo build --release
 
 ```bash
 # 글로벌 설정
-./ardiex config set periodic_interval_minutes 30
 ./ardiex config set enable_periodic false
 ./ardiex config set enable_event_driven false
 ./ardiex config set max_backups 20
@@ -218,6 +256,10 @@ cargo build --release
 | `backup_mode`          | `"delta"`        | 지정 시 오버라이드 |
 | `full_backup_interval` | `10`             | 지정 시 오버라이드 |
 | `cron_schedule`        | `"0 0 * * * *"`  | 지정 시 오버라이드 |
+| `enable_event_driven`  | `true`           | 지정 시 오버라이드 |
+| `enable_periodic`      | `true`           | 지정 시 오버라이드 |
+
+> **제약**: delta 모드에서는 `max_backups >= full_backup_interval`이어야 합니다. 복원에는 full + 이후 모든 inc가 필요하기 때문입니다. 글로벌/소스별 설정 변경 시 자동으로 교차 검증됩니다.
 
 ### 6. 백업 관리
 

@@ -416,10 +416,6 @@
       <h2>글로벌 설정</h2>
 
       <div class="field">
-        <label>periodic_interval_minutes</label>
-        <input type="number" id="g-periodic-interval" min="1" value="60" />
-      </div>
-      <div class="field">
         <label>enable_periodic</label>
         <div class="checkbox-field">
           <input type="checkbox" id="g-enable-periodic" checked />
@@ -450,7 +446,78 @@
       </div>
       <div class="field">
         <label>cron_schedule</label>
-        <input type="text" id="g-cron" value="0 0 * * * *" />
+        <div class="path-input-group">
+          <input type="text" id="g-cron" value="0 0 * * * *" />
+          <button class="btn-browse btn-sm" onclick="openCronBuilder('global')">🕐 빌더</button>
+        </div>
+        <div class="help-text" style="margin-top: 6px">
+          <strong>6필드 형식:</strong> 초 분 시 일 월 요일 &nbsp;
+          <span style="color: var(--text-muted)">| 일반 crontab(5필드) 앞에 <code>0 </code> 추가</span>
+        </div>
+        <details style="margin-top: 6px; font-size: 0.8rem; color: var(--text-muted)">
+          <summary style="cursor: pointer; color: var(--primary)">Cron 표현식 가이드 보기</summary>
+          <div
+            style="
+              margin-top: 8px;
+              padding: 10px;
+              background: var(--bg);
+              border-radius: var(--radius);
+              line-height: 1.6;
+            ">
+            <pre style="margin: 0; font-size: 0.75rem; color: var(--text)">
+┌──────── 초 (0-59)
+│ ┌────── 분 (0-59)
+│ │ ┌──── 시 (0-23)
+│ │ │ ┌── 일 (1-31)
+│ │ │ │ ┌ 월 (1-12)
+│ │ │ │ │ ┌ 요일 (0-6, 0=일)
+* * * * * *</pre
+            >
+            <table style="width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 0.75rem">
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 0 * * * *</code></td>
+                <td>매시 정각 (기본값)</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 */30 * * * *</code></td>
+                <td>30분마다</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 */5 * * * *</code></td>
+                <td>5분마다</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 0 */2 * * *</code></td>
+                <td>2시간마다</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 0 9 * * *</code></td>
+                <td>매일 오전 9시</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 0 0 * * *</code></td>
+                <td>매일 자정</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--border)">
+                <td style="padding: 3px 6px"><code>0 0 9 * * 1-5</code></td>
+                <td>평일 오전 9시</td>
+              </tr>
+              <tr>
+                <td style="padding: 3px 6px"><code>0 0 0 1 * *</code></td>
+                <td>매월 1일 자정</td>
+              </tr>
+            </table>
+            <p style="margin-top: 8px">
+              <strong>특수 문자:</strong> <code>*</code> 모든 값 &nbsp; <code>*/N</code> N 간격 &nbsp;
+              <code>N-M</code> 범위 &nbsp; <code>N,M</code> 목록
+            </p>
+            <p style="margin-top: 4px">
+              5필드 확인:
+              <a href="https://crontab.guru" target="_blank" style="color: var(--primary)">crontab.guru</a> (앞에
+              <code>0 </code> 추가)
+            </p>
+          </div>
+        </details>
       </div>
       <div class="field">
         <label>enable_min_interval_by_size</label>
@@ -495,6 +562,123 @@
       </div>
     </div>
 
+    <!-- Modal: Cron Builder -->
+    <div class="modal-overlay" id="modal-cron">
+      <div class="modal" style="width: 560px">
+        <h3>🕐 Cron 표현식 빌더</h3>
+        <p class="help-text" style="margin-bottom: 12px">원하는 주기를 선택하면 자동으로 cron 표현식이 생성됩니다.</p>
+
+        <div class="field" style="grid-template-columns: 1fr">
+          <label>프리셋 선택</label>
+          <select id="cron-preset" onchange="applyCronPreset()">
+            <option value="">직접 설정...</option>
+            <option value="0 */5 * * * *">5분마다</option>
+            <option value="0 */10 * * * *">10분마다</option>
+            <option value="0 */30 * * * *">30분마다</option>
+            <option value="0 0 * * * *">매시 정각</option>
+            <option value="0 0 */2 * * *">2시간마다</option>
+            <option value="0 0 */6 * * *">6시간마다</option>
+            <option value="0 0 */12 * * *">12시간마다</option>
+            <option value="0 0 0 * * *">매일 자정</option>
+            <option value="0 0 9 * * *">매일 오전 9시</option>
+            <option value="0 0 9 * * 1-5">평일 오전 9시</option>
+            <option value="0 0 0 * * 0">매주 일요일 자정</option>
+            <option value="0 0 0 1 * *">매월 1일 자정</option>
+          </select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px">
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>초 (0-59)</label>
+            <select id="cron-sec" onchange="updateCronPreview()">
+              <option value="0">0 (고정)</option>
+              <option value="*">매초 (*)</option>
+              <option value="*/10">10초마다</option>
+              <option value="*/15">15초마다</option>
+              <option value="*/30">30초마다</option>
+            </select>
+          </div>
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>분 (0-59)</label>
+            <select id="cron-min" onchange="updateCronPreview()">
+              <option value="0">0 (정각)</option>
+              <option value="*">매분 (*)</option>
+              <option value="*/5">5분마다</option>
+              <option value="*/10">10분마다</option>
+              <option value="*/15">15분마다</option>
+              <option value="*/30">30분마다</option>
+            </select>
+          </div>
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>시 (0-23)</label>
+            <select id="cron-hour" onchange="updateCronPreview()">
+              <option value="*">매시 (*)</option>
+              <option value="*/2">2시간마다</option>
+              <option value="*/6">6시간마다</option>
+              <option value="*/12">12시간마다</option>
+              <option value="0">자정 (0)</option>
+              <option value="6">오전 6시</option>
+              <option value="9">오전 9시</option>
+              <option value="12">정오 (12)</option>
+              <option value="18">오후 6시</option>
+              <option value="21">오후 9시</option>
+              <option value="9-17">업무시간 (9-17)</option>
+            </select>
+          </div>
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>일 (1-31)</label>
+            <select id="cron-day" onchange="updateCronPreview()">
+              <option value="*">매일 (*)</option>
+              <option value="1">1일</option>
+              <option value="15">15일</option>
+              <option value="1,15">1일, 15일</option>
+            </select>
+          </div>
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>월 (1-12)</label>
+            <select id="cron-month" onchange="updateCronPreview()">
+              <option value="*">매월 (*)</option>
+              <option value="*/3">분기마다</option>
+              <option value="*/6">반기마다</option>
+            </select>
+          </div>
+          <div class="field" style="grid-template-columns: 1fr">
+            <label>요일 (0-6)</label>
+            <select id="cron-dow" onchange="updateCronPreview()">
+              <option value="*">매일 (*)</option>
+              <option value="1-5">평일 (월-금)</option>
+              <option value="0,6">주말 (토,일)</option>
+              <option value="0">일요일</option>
+              <option value="1">월요일</option>
+              <option value="5">금요일</option>
+            </select>
+          </div>
+        </div>
+
+        <div
+          style="
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: var(--radius);
+            text-align: center;
+          ">
+          <label style="font-size: 0.75rem; color: var(--text-muted)">생성된 표현식</label>
+          <div
+            id="cron-preview"
+            style="font-size: 1.3rem; font-family: monospace; color: var(--primary); margin-top: 4px">
+            0 0 * * * *
+          </div>
+          <div id="cron-desc" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button onclick="closeModal('modal-cron')">취소</button>
+          <button class="btn-primary" onclick="confirmCronBuilder()">적용</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       let currentConfig = null;
       let fileHandle = null;
@@ -502,7 +686,6 @@
       function getDefaultConfig() {
         return {
           sources: [],
-          periodic_interval_minutes: 60,
           enable_periodic: true,
           enable_event_driven: true,
           exclude_patterns: ["*.tmp", "*.log", ".git/*", ".DS_Store"],
@@ -539,7 +722,6 @@
 
       function populateUI() {
         const c = currentConfig;
-        document.getElementById("g-periodic-interval").value = c.periodic_interval_minutes || 60;
         document.getElementById("g-enable-periodic").checked = c.enable_periodic !== false;
         document.getElementById("g-enable-event").checked = c.enable_event_driven !== false;
         document.getElementById("g-max-backups").value = c.max_backups || 10;
@@ -642,7 +824,26 @@
             <input type="text" value="${src.cron_schedule || ""}"
               placeholder="글로벌 설정 사용"
               onchange="updateSourceOverride(${idx}, 'cron_schedule', this.value)">
+            <button class="btn-sm" onclick="openCronBuilder('source', ${idx})">🕐 빌더</button>
             <button class="btn-sm" onclick="resetOverride(${idx}, 'cron_schedule', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>enable_event_driven</label>
+            <select onchange="updateSourceOverride(${idx}, 'enable_event_driven', this.value)">
+              <option value="" ${src.enable_event_driven == null ? "selected" : ""}>글로벌 설정 사용</option>
+              <option value="true" ${src.enable_event_driven === true ? "selected" : ""}>true</option>
+              <option value="false" ${src.enable_event_driven === false ? "selected" : ""}>false</option>
+            </select>
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'enable_event_driven', this)">reset</button>
+          </div>
+          <div class="override-row">
+            <label>enable_periodic</label>
+            <select onchange="updateSourceOverride(${idx}, 'enable_periodic', this.value)">
+              <option value="" ${src.enable_periodic == null ? "selected" : ""}>글로벌 설정 사용</option>
+              <option value="true" ${src.enable_periodic === true ? "selected" : ""}>true</option>
+              <option value="false" ${src.enable_periodic === false ? "selected" : ""}>false</option>
+            </select>
+            <button class="btn-sm" onclick="resetOverride(${idx}, 'enable_periodic', this)">reset</button>
           </div>
         </div>
       </div>
@@ -657,7 +858,9 @@
           src.max_backups != null ||
           src.backup_mode != null ||
           src.full_backup_interval != null ||
-          src.cron_schedule != null
+          src.cron_schedule != null ||
+          src.enable_event_driven != null ||
+          src.enable_periodic != null
         );
       }
 
@@ -689,8 +892,8 @@
           toast("경로를 입력하세요.", "error");
           return;
         }
-        if (!path.startsWith("/")) {
-          toast("절대경로를 입력하세요. (/ 로 시작)", "error");
+        if (!isAbsolutePath(path)) {
+          toast("절대경로를 입력하세요. (Unix: / 시작, Windows: C:\\ 등)", "error");
           return;
         }
 
@@ -712,6 +915,135 @@
 
       function closeModal(id) {
         document.getElementById(id).classList.remove("active");
+      }
+
+      // ── Cron Builder ──
+      let cronTarget = { type: "global", sourceIdx: -1 };
+
+      function openCronBuilder(type, sourceIdx) {
+        cronTarget = { type, sourceIdx: sourceIdx != null ? sourceIdx : -1 };
+        // Pre-fill from current value
+        let current = "";
+        if (type === "global") {
+          current = document.getElementById("g-cron").value;
+        } else if (type === "source" && currentConfig) {
+          current = currentConfig.sources[sourceIdx].cron_schedule || "";
+        }
+        if (current) {
+          parseCronToSelects(current);
+        } else {
+          resetCronSelects();
+        }
+        document.getElementById("cron-preset").value = "";
+        updateCronPreview();
+        document.getElementById("modal-cron").classList.add("active");
+      }
+
+      function parseCronToSelects(expr) {
+        const parts = expr.trim().split(/\s+/);
+        if (parts.length >= 6) {
+          setSelectIfMatch("cron-sec", parts[0]);
+          setSelectIfMatch("cron-min", parts[1]);
+          setSelectIfMatch("cron-hour", parts[2]);
+          setSelectIfMatch("cron-day", parts[3]);
+          setSelectIfMatch("cron-month", parts[4]);
+          setSelectIfMatch("cron-dow", parts[5]);
+        }
+      }
+
+      function setSelectIfMatch(id, value) {
+        const sel = document.getElementById(id);
+        for (let i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === value) {
+            sel.selectedIndex = i;
+            return;
+          }
+        }
+        // If no match, keep first option
+        sel.selectedIndex = 0;
+      }
+
+      function resetCronSelects() {
+        document.getElementById("cron-sec").value = "0";
+        document.getElementById("cron-min").value = "0";
+        document.getElementById("cron-hour").value = "*";
+        document.getElementById("cron-day").value = "*";
+        document.getElementById("cron-month").value = "*";
+        document.getElementById("cron-dow").value = "*";
+      }
+
+      function applyCronPreset() {
+        const preset = document.getElementById("cron-preset").value;
+        if (preset) {
+          parseCronToSelects(preset);
+          updateCronPreview();
+        }
+      }
+
+      function updateCronPreview() {
+        const sec = document.getElementById("cron-sec").value;
+        const min = document.getElementById("cron-min").value;
+        const hour = document.getElementById("cron-hour").value;
+        const day = document.getElementById("cron-day").value;
+        const month = document.getElementById("cron-month").value;
+        const dow = document.getElementById("cron-dow").value;
+        const expr = `${sec} ${min} ${hour} ${day} ${month} ${dow}`;
+        document.getElementById("cron-preview").textContent = expr;
+        document.getElementById("cron-desc").textContent = describeCron(sec, min, hour, day, month, dow);
+      }
+
+      function describeCron(sec, min, hour, day, month, dow) {
+        const parts = [];
+        // Frequency
+        if (sec !== "0" && sec !== "*") parts.push(sec.replace("*/", "") + "초마다");
+        if (min === "*") parts.push("매분");
+        else if (min.startsWith("*/")) parts.push(min.replace("*/", "") + "분마다");
+        else if (min === "0" && hour !== "*") {
+          /* skip, handled by hour */
+        } else if (min === "0") parts.push("정각");
+
+        if (hour === "*" && min !== "*") {
+          /* every hour implied */
+        } else if (hour === "*") parts.push("매시");
+        else if (hour.startsWith("*/")) parts.push(hour.replace("*/", "") + "시간마다");
+        else if (hour.includes("-")) parts.push(hour + "시");
+        else parts.push(hour + "시");
+
+        if (day !== "*") {
+          if (day.includes(",")) parts.push(day + "일");
+          else parts.push(day + "일");
+        }
+        if (month !== "*") {
+          if (month.startsWith("*/")) parts.push(month.replace("*/", "") + "개월마다");
+          else parts.push(month + "월");
+        }
+        if (dow !== "*") {
+          const dowMap = {
+            0: "일",
+            1: "월",
+            2: "화",
+            3: "수",
+            4: "목",
+            5: "금",
+            6: "토",
+            "1-5": "평일",
+            "0,6": "주말"
+          };
+          parts.push(dowMap[dow] || dow + "요일");
+        }
+        return parts.join(", ");
+      }
+
+      function confirmCronBuilder() {
+        const expr = document.getElementById("cron-preview").textContent;
+        if (cronTarget.type === "global") {
+          document.getElementById("g-cron").value = expr;
+        } else if (cronTarget.type === "source" && currentConfig) {
+          currentConfig.sources[cronTarget.sourceIdx].cron_schedule = expr;
+          renderSources();
+        }
+        closeModal("modal-cron");
+        toast(`Cron 표현식 적용: ${expr}`, "success");
       }
 
       // Close modals on Escape key
@@ -781,6 +1113,8 @@
             .filter((s) => s);
         } else if (key === "max_backups" || key === "full_backup_interval") {
           src[key] = parseInt(value, 10);
+        } else if (key === "enable_event_driven" || key === "enable_periodic") {
+          src[key] = value === "true";
         } else {
           src[key] = value;
         }
@@ -794,8 +1128,6 @@
       function collectConfig() {
         if (!currentConfig) currentConfig = getDefaultConfig();
 
-        currentConfig.periodic_interval_minutes =
-          parseInt(document.getElementById("g-periodic-interval").value, 10) || 60;
         currentConfig.enable_periodic = document.getElementById("g-enable-periodic").checked;
         currentConfig.enable_event_driven = document.getElementById("g-enable-event").checked;
         currentConfig.max_backups = parseInt(document.getElementById("g-max-backups").value, 10) || 10;
@@ -822,6 +1154,11 @@
         // Global
         if (config.max_backups < 1) errors.push("글로벌 max_backups는 1 이상이어야 합니다.");
         if (config.full_backup_interval < 1) errors.push("글로벌 full_backup_interval은 1 이상이어야 합니다.");
+        if (config.backup_mode === "delta" && config.max_backups < config.full_backup_interval) {
+          errors.push(
+            `글로벌: delta 모드에서 max_backups(${config.max_backups})는 full_backup_interval(${config.full_backup_interval}) 이상이어야 합니다. 복원에는 full + 이후 모든 inc가 필요합니다.`
+          );
+        }
         if (!config.cron_schedule || config.cron_schedule.trim().split(/\s+/).length < 6) {
           errors.push("글로벌 cron_schedule이 유효하지 않습니다. (최소 6필드: 초 분 시 일 월 요일)");
         }
@@ -832,7 +1169,7 @@
           const label = `소스[${i}] "${src.source_dir}"`;
 
           // Absolute path
-          if (!src.source_dir.startsWith("/")) {
+          if (!isAbsolutePath(src.source_dir)) {
             errors.push(`${label}: source_dir은 절대경로여야 합니다.`);
           }
 
@@ -846,7 +1183,7 @@
           const seenBackups = new Set();
           for (let j = 0; j < (src.backup_dirs || []).length; j++) {
             const bd = src.backup_dirs[j];
-            if (!bd.startsWith("/")) {
+            if (!isAbsolutePath(bd)) {
               errors.push(`${label}: backup_dirs[${j}]은 절대경로여야 합니다.`);
             }
             if (bd === src.source_dir) {
@@ -867,6 +1204,17 @@
           }
           if (src.cron_schedule && src.cron_schedule.trim().split(/\s+/).length < 6) {
             errors.push(`${label}: cron_schedule이 유효하지 않습니다.`);
+          }
+          // Delta mode: max_backups >= full_backup_interval
+          const effMode = src.backup_mode || config.backup_mode;
+          if (effMode === "delta") {
+            const effMax = src.max_backups != null ? src.max_backups : config.max_backups;
+            const effFbi = src.full_backup_interval != null ? src.full_backup_interval : config.full_backup_interval;
+            if (effMax < effFbi) {
+              errors.push(
+                `${label}: delta 모드에서 max_backups(${effMax})는 full_backup_interval(${effFbi}) 이상이어야 합니다.`
+              );
+            }
           }
         }
 
@@ -953,6 +1301,15 @@
         el.textContent = msg;
         document.body.appendChild(el);
         setTimeout(() => el.remove(), type === "error" ? 6000 : 3000);
+      }
+
+      function isAbsolutePath(p) {
+        if (!p) return false;
+        // Unix: /path/to/dir
+        if (p.startsWith("/")) return true;
+        // Windows: C:\, D:\, C:/, D:/ etc.
+        if (/^[A-Za-z]:[\\\/]/.test(p)) return true;
+        return false;
       }
 
       function escHtml(s) {

@@ -54,7 +54,7 @@ ardiex/
 #### 글로벌/소스별 설정
 
 - 소스별 설정이 존재하면 글로벌 오버라이드
-- 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`
+- 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `enable_event_driven`, `enable_periodic`
 - `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - `config set-source <source> <key> reset`으로 초기화
 
