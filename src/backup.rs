@@ -385,24 +385,15 @@ impl BackupManager {
                             let delta_data = delta::create_delta(&prev_path, file_path)?;
                             let delta_bytes = delta::delta_size(&delta_data);
                             let file_size = fs::metadata(file_path)?.len();
-
-                            if (delta_bytes as u64) < file_size / 2 {
-                                let delta_file_path = backup_file_path.with_extension(
-                                    format!("{}.delta", backup_file_path.extension()
-                                        .unwrap_or_default().to_string_lossy())
-                                );
-                                delta::save_delta(&delta_data, &delta_file_path)?;
-                                bytes_processed += delta_bytes as u64;
-                                info!("Delta backup: {:?} ({} bytes delta vs {} bytes full, {}/{} blocks changed)",
-                                    relative_path, delta_bytes, file_size,
-                                    delta_data.changed_blocks.len(), delta_data.total_blocks);
-                            } else {
-                                fs::copy(file_path, &backup_file_path)?;
-                                bytes_processed += file_size;
-                                info!("Full copy (delta not efficient): {:?} ({} bytes, {}/{} blocks changed)",
-                                    relative_path, file_size,
-                                    delta_data.changed_blocks.len(), delta_data.total_blocks);
-                            }
+                            let delta_file_path = backup_file_path.with_extension(
+                                format!("{}.delta", backup_file_path.extension()
+                                    .unwrap_or_default().to_string_lossy())
+                            );
+                            delta::save_delta(&delta_data, &delta_file_path)?;
+                            bytes_processed += delta_bytes as u64;
+                            info!("Delta backup: {:?} ({} bytes delta vs {} bytes full, {}/{} blocks changed)",
+                                relative_path, delta_bytes, file_size,
+                                delta_data.changed_blocks.len(), delta_data.total_blocks);
                         } else {
                             fs::copy(file_path, &backup_file_path)?;
                             let file_size = fs::metadata(file_path)?.len();
