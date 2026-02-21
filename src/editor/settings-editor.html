@@ -81,6 +81,11 @@
         background: var(--surface2);
       }
 
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
       .btn-primary {
         background: var(--primary);
         border-color: var(--primary);
@@ -205,10 +210,16 @@
         display: flex;
         gap: 6px;
         align-items: center;
+        width: 100%;
       }
 
       .backup-dir-row input {
         flex: 1;
+      }
+
+      .backup-dir-row .path-input-group {
+        flex: 1;
+        min-width: 0;
       }
 
       .tag {
@@ -287,6 +298,12 @@
         overflow-y: auto;
         color: var(--text-muted);
         display: none;
+      }
+
+      .json-preview-actions {
+        display: none;
+        justify-content: flex-end;
+        margin-bottom: 8px;
       }
 
       .section-toggle {
@@ -386,6 +403,32 @@
         margin-top: 16px;
       }
 
+      .dnd-overlay {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.75);
+        border: 2px dashed var(--primary);
+        z-index: 3000;
+        pointer-events: none;
+      }
+
+      .dnd-overlay.active {
+        display: flex;
+      }
+
+      .dnd-box {
+        background: rgba(30, 41, 59, 0.95);
+        border: 1px solid var(--primary);
+        color: var(--text);
+        padding: 16px 20px;
+        border-radius: var(--radius);
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+
       @media (max-width: 640px) {
         .field {
           grid-template-columns: 1fr;
@@ -403,12 +446,19 @@
     <div class="toolbar">
       <button class="btn-primary" onclick="newConfig()">📄 새로 만들기</button>
       <button class="btn-primary" onclick="loadFile()">📂 파일 열기</button>
-      <button class="btn-primary" onclick="saveFile()">💾 저장</button>
+      <button id="save-btn" class="btn-primary" onclick="saveFile()" disabled>💾 저장</button>
       <button onclick="downloadFile()">⬇ 다운로드</button>
       <button onclick="togglePreview()">{ } JSON 미리보기</button>
       <button onclick="validateConfig()">✓ 검증</button>
     </div>
 
+    <div id="dnd-overlay" class="dnd-overlay">
+      <div class="dnd-box">settings.json 파일을 화면 아무 곳에나 놓으세요</div>
+    </div>
+
+    <div id="json-preview-actions" class="json-preview-actions">
+      <button class="btn-sm" onclick="copyPreviewJson()">📋 미리보기 JSON 복사</button>
+    </div>
     <div id="json-preview" class="json-preview"></div>
 
     <!-- Global Settings -->
@@ -682,6 +732,9 @@
     <script>
       let currentConfig = null;
       let fileHandle = null;
+      let hasOpenedFile = false;
+      let dragDepth = 0;
+      const SETTINGS_FILE_NAME = "settings.json";
 
       function getDefaultConfig() {
         return {
@@ -698,26 +751,280 @@
         };
       }
 
-      function loadFile() {
+      async function loadFile() {
+        if ("showOpenFilePicker" in window) {
+          await loadFileWithFSAPI();
+          return;
+        }
         document.getElementById("file-input").click();
       }
 
-      function handleFileLoad(event) {
+      async function loadFileWithFSAPI() {
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            multiple: false,
+            types: [
+              {
+                description: "JSON Files",
+                accept: { "application/json": [".json"] }
+              }
+            ]
+          });
+          if (!handle) return;
+
+          const file = await handle.getFile();
+          await applyLoadedConfigFile(file, handle, false);
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            toast("파일 열기 실패: " + err.message, "error");
+          }
+        }
+      }
+
+      async function handleFileLoad(event) {
         const file = event.target.files[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            currentConfig = JSON.parse(e.target.result);
-            populateUI();
-            toast("설정 파일을 불러왔습니다.", "success");
-          } catch (err) {
-            toast("JSON 파싱 실패: " + err.message, "error");
-          }
-        };
-        reader.readAsText(file);
+        try {
+          await applyLoadedConfigFile(file, null, false);
+        } catch (err) {
+          toast("파일 열기 실패: " + err.message, "error");
+        }
         event.target.value = "";
+      }
+
+      async function applyLoadedConfigFile(file, handle, fromDrop) {
+        if (!isSettingsJsonFileName(file.name)) {
+          throw new Error(`"${SETTINGS_FILE_NAME}" 파일만 불러올 수 있습니다. 현재 파일: ${file.name}`);
+        }
+
+        let parsed;
+        try {
+          const content = await file.text();
+          parsed = JSON.parse(content);
+        } catch (err) {
+          throw new Error("유효한 JSON 형식이 아닙니다.");
+        }
+
+        const schemaErrors = validateLoadedSettingsSchema(parsed);
+        if (schemaErrors.length > 0) {
+          throw new Error("settings.json 속성 검증 실패:\n" + schemaErrors.join("\n"));
+        }
+
+        currentConfig = parsed;
+        fileHandle = handle || null;
+        hasOpenedFile = true;
+        populateUI();
+        setSaveButtonEnabled(true);
+
+        if (handle) {
+          toast(`설정 파일을 불러왔습니다: ${file.name}`, "success");
+          return;
+        }
+
+        if (fromDrop) {
+          toast("파일 불러오기로 설정 파일을 불러왔습니다. (브라우저 제약으로 저장 시 다운로드될 수 있습니다)", "success");
+          return;
+        }
+
+        toast("설정 파일을 불러왔습니다. (브라우저 제약으로 저장 시 다운로드될 수 있습니다)", "success");
+      }
+
+      function isSettingsJsonFileName(name) {
+        return (name || "").toLowerCase() === SETTINGS_FILE_NAME;
+      }
+
+      function isPlainObject(v) {
+        return !!v && typeof v === "object" && !Array.isArray(v);
+      }
+
+      function isStringArray(v) {
+        return Array.isArray(v) && v.every((x) => typeof x === "string");
+      }
+
+      function hasValidCronFields(expr) {
+        return typeof expr === "string" && expr.trim().split(/\s+/).length >= 6;
+      }
+
+      function validateLoadedSettingsSchema(config) {
+        const errors = [];
+
+        if (!isPlainObject(config)) {
+          errors.push("루트는 JSON 객체여야 합니다.");
+          return errors;
+        }
+
+        if (!Array.isArray(config.sources)) {
+          errors.push("sources는 배열이어야 합니다.");
+        }
+        if (typeof config.enable_periodic !== "boolean") {
+          errors.push("enable_periodic은 boolean이어야 합니다.");
+        }
+        if (typeof config.enable_event_driven !== "boolean") {
+          errors.push("enable_event_driven은 boolean이어야 합니다.");
+        }
+        if (!isStringArray(config.exclude_patterns)) {
+          errors.push("exclude_patterns는 문자열 배열이어야 합니다.");
+        }
+        if (!Number.isInteger(config.max_backups) || config.max_backups < 1) {
+          errors.push("max_backups는 1 이상의 정수여야 합니다.");
+        }
+        if (!(config.backup_mode === "delta" || config.backup_mode === "copy")) {
+          errors.push("backup_mode는 'delta' 또는 'copy'여야 합니다.");
+        }
+        if (!Number.isInteger(config.full_backup_interval) || config.full_backup_interval < 1) {
+          errors.push("full_backup_interval은 1 이상의 정수여야 합니다.");
+        }
+        if (!hasValidCronFields(config.cron_schedule)) {
+          errors.push("cron_schedule은 최소 6필드(초 분 시 일 월 요일)여야 합니다.");
+        }
+        if (typeof config.enable_min_interval_by_size !== "boolean") {
+          errors.push("enable_min_interval_by_size는 boolean이어야 합니다.");
+        }
+        if (!isPlainObject(config.metadata)) {
+          errors.push("metadata는 객체여야 합니다.");
+        }
+
+        if (Array.isArray(config.sources)) {
+          config.sources.forEach((src, idx) => {
+            const label = `sources[${idx}]`;
+            if (!isPlainObject(src)) {
+              errors.push(`${label}는 객체여야 합니다.`);
+              return;
+            }
+
+            if (typeof src.source_dir !== "string" || src.source_dir.trim() === "") {
+              errors.push(`${label}.source_dir은 비어있지 않은 문자열이어야 합니다.`);
+            }
+            if (!Array.isArray(src.backup_dirs) || !src.backup_dirs.every((v) => typeof v === "string")) {
+              errors.push(`${label}.backup_dirs는 문자열 배열이어야 합니다.`);
+            }
+            if (typeof src.enabled !== "boolean") {
+              errors.push(`${label}.enabled는 boolean이어야 합니다.`);
+            }
+
+            if (src.exclude_patterns != null && !isStringArray(src.exclude_patterns)) {
+              errors.push(`${label}.exclude_patterns는 문자열 배열이어야 합니다.`);
+            }
+            if (src.max_backups != null && (!Number.isInteger(src.max_backups) || src.max_backups < 1)) {
+              errors.push(`${label}.max_backups는 1 이상의 정수여야 합니다.`);
+            }
+            if (
+              src.backup_mode != null &&
+              !(src.backup_mode === "delta" || src.backup_mode === "copy")
+            ) {
+              errors.push(`${label}.backup_mode는 'delta' 또는 'copy'여야 합니다.`);
+            }
+            if (
+              src.full_backup_interval != null &&
+              (!Number.isInteger(src.full_backup_interval) || src.full_backup_interval < 1)
+            ) {
+              errors.push(`${label}.full_backup_interval은 1 이상의 정수여야 합니다.`);
+            }
+            if (src.cron_schedule != null && !hasValidCronFields(src.cron_schedule)) {
+              errors.push(`${label}.cron_schedule은 최소 6필드여야 합니다.`);
+            }
+            if (src.enable_event_driven != null && typeof src.enable_event_driven !== "boolean") {
+              errors.push(`${label}.enable_event_driven은 boolean이어야 합니다.`);
+            }
+            if (src.enable_periodic != null && typeof src.enable_periodic !== "boolean") {
+              errors.push(`${label}.enable_periodic은 boolean이어야 합니다.`);
+            }
+          });
+        }
+
+        return errors;
+      }
+
+      function isFileDrag(event) {
+        const dt = event.dataTransfer;
+        if (!dt || !dt.types) return false;
+        return Array.from(dt.types).includes("Files");
+      }
+
+      function pickDroppedJsonFile(files) {
+        const arr = Array.from(files || []);
+        if (arr.length === 0) return null;
+
+        return arr.find((f) => isSettingsJsonFileName(f.name)) || null;
+      }
+
+      async function getDroppedFileHandle(dataTransfer, fileName) {
+        if (!dataTransfer || !dataTransfer.items) return null;
+
+        for (const item of dataTransfer.items) {
+          if (item.kind !== "file" || !item.getAsFileSystemHandle) continue;
+
+          try {
+            const handle = await item.getAsFileSystemHandle();
+            if (handle && handle.kind === "file" && (!fileName || handle.name === fileName)) {
+              return handle;
+            }
+          } catch (err) {
+            // ignore and continue
+          }
+        }
+
+        return null;
+      }
+
+      function setDndOverlay(active) {
+        const overlay = document.getElementById("dnd-overlay");
+        if (!overlay) return;
+        overlay.classList.toggle("active", active);
+      }
+
+      async function handleGlobalDrop(event) {
+        const dt = event.dataTransfer;
+        const file = pickDroppedJsonFile(dt ? dt.files : []);
+
+        if (!file) {
+          toast(`"${SETTINGS_FILE_NAME}" 파일만 불러올 수 있습니다.`, "error");
+          return;
+        }
+
+        let handle = null;
+        try {
+          handle = await getDroppedFileHandle(dt, file.name);
+        } catch (err) {
+          handle = null;
+        }
+
+        try {
+          await applyLoadedConfigFile(file, handle, true);
+        } catch (err) {
+          toast("파일 열기 실패: " + err.message, "error");
+        }
+      }
+
+      function setupGlobalDragAndDrop() {
+        window.addEventListener("dragenter", (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          dragDepth += 1;
+          setDndOverlay(true);
+        });
+
+        window.addEventListener("dragover", (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        });
+
+        window.addEventListener("dragleave", (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          dragDepth = Math.max(0, dragDepth - 1);
+          if (dragDepth === 0) setDndOverlay(false);
+        });
+
+        window.addEventListener("drop", async (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          dragDepth = 0;
+          setDndOverlay(false);
+          await handleGlobalDrop(event);
+        });
       }
 
       function populateUI() {
@@ -732,13 +1039,17 @@
         document.getElementById("g-exclude").value = (c.exclude_patterns || []).join(", ");
 
         renderSources();
+        syncPreviewIfVisible();
       }
 
       function renderSources() {
         const container = document.getElementById("sources-container");
         container.innerHTML = "";
 
-        if (!currentConfig || !currentConfig.sources) return;
+        if (!currentConfig || !currentConfig.sources) {
+          syncPreviewIfVisible();
+          return;
+        }
 
         currentConfig.sources.forEach((src, idx) => {
           const card = document.createElement("div");
@@ -850,6 +1161,8 @@
     `;
           container.appendChild(card);
         });
+
+        syncPreviewIfVisible();
       }
 
       function hasOverrides(src) {
@@ -1042,6 +1355,7 @@
           currentConfig.sources[cronTarget.sourceIdx].cron_schedule = expr;
           renderSources();
         }
+        syncPreviewIfVisible();
         closeModal("modal-cron");
         toast(`Cron 표현식 적용: ${expr}`, "success");
       }
@@ -1084,10 +1398,12 @@
 
       function updateSourceField(idx, field, value) {
         currentConfig.sources[idx][field] = value;
+        syncPreviewIfVisible();
       }
 
       function updateBackupDir(idx, bi, value) {
         currentConfig.sources[idx].backup_dirs[bi] = value;
+        syncPreviewIfVisible();
       }
 
       function addBackupDir(idx) {
@@ -1104,6 +1420,7 @@
         const src = currentConfig.sources[idx];
         if (value === "" || value == null) {
           delete src[key];
+          syncPreviewIfVisible();
           return;
         }
         if (key === "exclude_patterns") {
@@ -1118,6 +1435,7 @@
         } else {
           src[key] = value;
         }
+        syncPreviewIfVisible();
       }
 
       function resetOverride(idx, key, btn) {
@@ -1228,35 +1546,128 @@
 
       function togglePreview() {
         const el = document.getElementById("json-preview");
+        const actions = document.getElementById("json-preview-actions");
         if (el.style.display === "none" || !el.style.display) {
-          const config = collectConfig();
-          // Clean up undefined/null optional fields for display
-          const cleaned = JSON.parse(
-            JSON.stringify(config, (key, value) => {
-              if (value === null || value === undefined) return undefined;
-              return value;
-            })
-          );
-          el.textContent = JSON.stringify(cleaned, null, 2);
+          renderPreviewJson();
           el.style.display = "block";
+          actions.style.display = "flex";
         } else {
           el.style.display = "none";
+          actions.style.display = "none";
+        }
+      }
+
+      function getPreviewJsonText() {
+        const config = collectConfig();
+        const cleaned = JSON.parse(
+          JSON.stringify(config, (key, value) => {
+            if (value === null || value === undefined) return undefined;
+            return value;
+          })
+        );
+        return JSON.stringify(cleaned, null, 2);
+      }
+
+      function renderPreviewJson() {
+        const el = document.getElementById("json-preview");
+        el.textContent = getPreviewJsonText();
+      }
+
+      function isPreviewVisible() {
+        const el = document.getElementById("json-preview");
+        return !!el && el.style.display === "block";
+      }
+
+      function syncPreviewIfVisible() {
+        if (isPreviewVisible()) {
+          renderPreviewJson();
+        }
+      }
+
+      function setupPreviewAutoRefresh() {
+        const ids = [
+          "g-enable-periodic",
+          "g-enable-event",
+          "g-max-backups",
+          "g-backup-mode",
+          "g-full-interval",
+          "g-cron",
+          "g-min-interval",
+          "g-exclude"
+        ];
+
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("input", syncPreviewIfVisible);
+          el.addEventListener("change", syncPreviewIfVisible);
+        });
+      }
+
+      async function copyPreviewJson() {
+        const text = getPreviewJsonText();
+        renderPreviewJson();
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            fallbackCopyText(text);
+          }
+          toast("JSON이 클립보드에 복사되었습니다.", "success");
+        } catch (err) {
+          toast("클립보드 복사 실패: " + err.message, "error");
+        }
+      }
+
+      function fallbackCopyText(text) {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        if (!ok) {
+          throw new Error("브라우저에서 클립보드 복사를 지원하지 않습니다.");
         }
       }
 
       function saveFile() {
+        if (!hasOpenedFile) {
+          toast("먼저 설정 파일을 열어주세요.", "error");
+          return;
+        }
+
         const config = collectConfig();
         if (!validateConfig()) return;
 
-        // Use File System Access API if available
+        if (fileHandle) {
+          saveToOpenedFile(config);
+          return;
+        }
+
+        // File System Access API 지원 시 새 파일 저장(저장 위치 선택)
         if ("showSaveFilePicker" in window) {
-          saveWithFSAPI(config);
+          saveAsWithFSAPI(config);
         } else {
           downloadFile();
         }
       }
 
-      async function saveWithFSAPI(config) {
+      async function saveToOpenedFile(config) {
+        try {
+          await writeConfigToHandle(fileHandle, config);
+          const name = fileHandle && fileHandle.name ? fileHandle.name : "열린 파일";
+          toast(`파일이 저장되었습니다: ${name}`, "success");
+        } catch (err) {
+          toast("저장 실패: " + err.message, "error");
+        }
+      }
+
+      async function saveAsWithFSAPI(config) {
         try {
           const handle = await window.showSaveFilePicker({
             suggestedName: "settings.json",
@@ -1267,15 +1678,20 @@
               }
             ]
           });
-          const writable = await handle.createWritable();
-          await writable.write(JSON.stringify(config, null, 2));
-          await writable.close();
+          await writeConfigToHandle(handle, config);
+          fileHandle = handle;
           toast("파일이 저장되었습니다.", "success");
         } catch (err) {
           if (err.name !== "AbortError") {
             toast("저장 실패: " + err.message, "error");
           }
         }
+      }
+
+      async function writeConfigToHandle(handle, config) {
+        const writable = await handle.createWritable();
+        await writable.write(JSON.stringify(config, null, 2));
+        await writable.close();
       }
 
       function downloadFile() {
@@ -1327,13 +1743,25 @@
           if (!confirm("현재 설정을 초기화하시겠습니까? 저장하지 않은 변경사항은 사라집니다.")) return;
         }
         currentConfig = getDefaultConfig();
+        fileHandle = null;
+        hasOpenedFile = false;
+        setSaveButtonEnabled(false);
         populateUI();
         toast("새 설정이 생성되었습니다.", "success");
       }
 
+      function setSaveButtonEnabled(enabled) {
+        const btn = document.getElementById("save-btn");
+        if (!btn) return;
+        btn.disabled = !enabled;
+      }
+
       // Init with empty state
       currentConfig = getDefaultConfig();
+      setSaveButtonEnabled(false);
       populateUI();
+      setupGlobalDragAndDrop();
+      setupPreviewAutoRefresh();
     </script>
   </body>
 </html>
