@@ -257,6 +257,15 @@ impl BackupManager {
             }
         }
 
+        // Startup validation can mark a backup dir as force-full once.
+        // After a successful full backup, clear that flag so subsequent
+        // backups in the same process can proceed as incremental.
+        for result in &results {
+            if matches!(result.backup_type, BackupType::Full) {
+                self.force_full_dirs.remove(&result.backup_dir);
+            }
+        }
+
         Ok(results)
     }
 
@@ -313,7 +322,7 @@ impl BackupManager {
             }
         };
 
-        let (mut backup_type, files_to_backup) = Self::scan_for_changes(
+        let (mut backup_type, mut files_to_backup) = Self::scan_for_changes(
             source_dir,
             &metadata,
             exclude_patterns,
@@ -323,6 +332,9 @@ impl BackupManager {
         if force_full && matches!(backup_type, BackupType::Incremental) {
             info!("Forcing full backup based on startup validation");
             backup_type = BackupType::Full;
+            // Re-collect full file set. scan_for_changes() returned only changed
+            // files for incremental mode, which could create an incomplete full.
+            files_to_backup = Self::collect_all_files(source_dir, exclude_patterns)?;
         }
 
         // Skip incremental backup if no files changed
@@ -488,6 +500,22 @@ impl BackupManager {
             .collect();
 
         Ok((backup_type, changed_files))
+    }
+
+    fn collect_all_files(
+        source_dir: &Path,
+        exclude_patterns: &[String],
+    ) -> Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        let mut hashes = HashMap::new();
+        Self::collect_files(
+            source_dir,
+            source_dir,
+            &mut files,
+            &mut hashes,
+            exclude_patterns,
+        )?;
+        Ok(files)
     }
 
     fn collect_files(
@@ -769,6 +797,84 @@ impl BackupManager {
                 }
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), ts))
+    }
+
+    #[tokio::test]
+    async fn clears_force_full_after_first_full_in_same_process() -> Result<()> {
+        let base = unique_temp_dir("ardiex_force_full_test");
+        let source_dir = base.join("source");
+        let backup_dir = base.join("backup");
+        fs::create_dir_all(&source_dir)?;
+        fs::create_dir_all(&backup_dir)?;
+
+        let file_path = source_dir.join("sample.txt");
+        fs::write(&file_path, b"v1")?;
+
+        let source = SourceConfig {
+            source_dir: source_dir.clone(),
+            backup_dirs: vec![backup_dir.clone()],
+            enabled: true,
+            exclude_patterns: None,
+            max_backups: None,
+            backup_mode: None,
+            full_backup_interval: None,
+            cron_schedule: None,
+            enable_event_driven: None,
+            enable_periodic: None,
+        };
+
+        let config = BackupConfig {
+            sources: vec![source],
+            enable_periodic: true,
+            enable_event_driven: true,
+            exclude_patterns: vec![],
+            max_backups: 10,
+            backup_mode: BackupMode::Delta,
+            full_backup_interval: 10,
+            cron_schedule: "0 0 * * * *".to_string(),
+            enable_min_interval_by_size: true,
+            metadata: HashMap::new(),
+        };
+
+        let mut manager = BackupManager::new(config);
+        manager.validate_all_sources()?;
+
+        let first = manager.backup_all_sources().await?;
+        assert_eq!(first.len(), 1);
+        assert!(matches!(first[0].backup_type, BackupType::Full));
+
+        std::thread::sleep(Duration::from_millis(5));
+        fs::write(&file_path, b"v2")?;
+
+        let second = manager.backup_all_sources().await?;
+        assert_eq!(second.len(), 1);
+        assert!(matches!(second[0].backup_type, BackupType::Incremental));
+
+        let entries: Vec<String> = fs::read_dir(&backup_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert!(entries.iter().any(|n| n.starts_with("full_")));
+        assert!(entries.iter().any(|n| n.starts_with("inc_")));
+
+        fs::remove_dir_all(&base)?;
         Ok(())
     }
 }
