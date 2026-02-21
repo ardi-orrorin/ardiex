@@ -11,7 +11,9 @@ use log::{error, info, warn};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::{interval, sleep};
+use tokio::time::sleep;
+use cron::Schedule;
+use std::str::FromStr;
 
 use backup::BackupManager;
 use config::ConfigManager;
@@ -135,6 +137,16 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn ensure_absolute(path: &std::path::Path, label: &str) -> Result<()> {
+    if !path.is_absolute() {
+        return Err(anyhow::anyhow!(
+            "{} must be an absolute path: {:?}",
+            label, path
+        ));
+    }
+    Ok(())
+}
+
 async fn handle_config(action: ConfigAction) -> Result<()> {
     let mut config_manager = ConfigManager::load_or_create()
         .context("Failed to load configuration")?;
@@ -153,6 +165,8 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
             println!("  Max backups: {}", config.max_backups);
             println!("  Backup mode: {:?}", config.backup_mode);
             println!("  Full backup interval: {} (inc backups before forced full)", config.full_backup_interval);
+            println!("  Cron schedule: {}", config.cron_schedule);
+            println!("  Min interval by size: {}", config.enable_min_interval_by_size);
             println!("  Exclude patterns: {:?}", config.exclude_patterns);
             println!("\nSources:");
             for source in &config.sources {
@@ -171,9 +185,16 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
                 if let Some(fbi) = source.full_backup_interval {
                     println!("    Full backup interval (local): {}", fbi);
                 }
+                if let Some(ref cs) = source.cron_schedule {
+                    println!("    Cron schedule (local): {}", cs);
+                }
             }
         }
         ConfigAction::AddSource { path, backup } => {
+            ensure_absolute(&path, "Source path")?;
+            for b in &backup {
+                ensure_absolute(b, "Backup path")?;
+            }
             if !path.exists() {
                 return Err(anyhow::anyhow!("Source directory does not exist: {:?}", path));
             }
@@ -217,14 +238,19 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
             println!("Source added successfully");
         }
         ConfigAction::RemoveSource { path } => {
+            ensure_absolute(&path, "Source path")?;
             config_manager.remove_source(&path)?;
             println!("Source removed successfully");
         }
         ConfigAction::AddBackup { source, backup } => {
+            ensure_absolute(&source, "Source path")?;
+            ensure_absolute(&backup, "Backup path")?;
             config_manager.add_backup_dir(&source, backup)?;
             println!("Backup directory added successfully");
         }
         ConfigAction::RemoveBackup { source, backup } => {
+            ensure_absolute(&source, "Source path")?;
+            ensure_absolute(&backup, "Backup path")?;
             config_manager.remove_backup_dir(&source, &backup)?;
             println!("Backup directory removed successfully");
         }
@@ -258,6 +284,15 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
                     config.full_backup_interval = value.parse()
                         .context("Invalid value for full_backup_interval")?;
                 }
+                "cron_schedule" => {
+                    Schedule::from_str(&value)
+                        .map_err(|e| anyhow::anyhow!("Invalid cron expression: '{}'. Error: {}\nFormat: sec min hour day-of-month month day-of-week year", value, e))?;
+                    config.cron_schedule = value;
+                }
+                "enable_min_interval_by_size" => {
+                    config.enable_min_interval_by_size = value.parse()
+                        .context("Invalid value for enable_min_interval_by_size")?;
+                }
                 _ => {
                     warn!("Unknown configuration key: {}", key);
                     return Ok(());
@@ -267,6 +302,7 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
             println!("Configuration updated successfully");
         }
         ConfigAction::SetSource { source, key, value } => {
+            ensure_absolute(&source, "Source path")?;
             let config = config_manager.get_config_mut();
             let src = config.sources.iter_mut()
                 .find(|s| s.source_dir == source);
@@ -311,6 +347,15 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
                         Some(value.parse().context("Invalid value for full_backup_interval")?)
                     };
                 }
+                "cron_schedule" => {
+                    src.cron_schedule = if is_reset {
+                        None
+                    } else {
+                        Schedule::from_str(&value)
+                            .map_err(|e| anyhow::anyhow!("Invalid cron expression: '{}'. Error: {}\nFormat: sec min hour day-of-month month day-of-week year", value, e))?;
+                        Some(value)
+                    };
+                }
                 _ => {
                     warn!("Unknown source configuration key: {}", key);
                     return Ok(());
@@ -334,6 +379,7 @@ async fn handle_backup() -> Result<()> {
     let mut backup_manager = BackupManager::new(config);
 
     info!("Starting manual backup");
+    backup_manager.validate_all_sources()?;
     
     match backup_manager.backup_all_sources().await {
         Ok(results) => {
@@ -364,25 +410,74 @@ async fn handle_run() -> Result<()> {
     let (backup_tx, mut backup_rx) = mpsc::channel::<()>(100);
 
     let mut backup_manager = BackupManager::new(config.clone());
+    backup_manager.validate_all_sources()?;
 
-    let periodic_task = if config.enable_periodic {
-        let interval_minutes = config.periodic_interval_minutes;
-        let backup_tx = backup_tx.clone();
-        
-        Some(tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(interval_minutes * 60));
-            loop {
-                interval.tick().await;
-                if let Err(e) = backup_tx.send(()).await {
-                    error!("Failed to send periodic backup trigger: {}", e);
-                    break;
-                }
-                info!("Periodic backup triggered");
+    // Cron-based scheduler: spawn one task per source with its own schedule
+    let mut cron_tasks = Vec::new();
+    if config.enable_periodic {
+        for source in &config.sources {
+            if !source.enabled {
+                continue;
             }
-        }))
-    } else {
-        None
-    };
+            let resolved = source.resolve(&config);
+            let cron_expr = resolved.cron_schedule.clone();
+            let source_dir = source.source_dir.clone();
+            let backup_tx = backup_tx.clone();
+            let enable_min_interval = config.enable_min_interval_by_size;
+
+            let schedule = Schedule::from_str(&cron_expr)
+                .map_err(|e| anyhow::anyhow!("Invalid cron for {:?}: {}", source_dir, e))?;
+
+            let task = tokio::spawn(async move {
+                // Calculate min interval based on source size
+                let min_interval = if enable_min_interval {
+                    let interval = BackupManager::calculate_min_interval_by_size(&source_dir);
+                    info!(
+                        "Source {:?}: min interval by size = {}s",
+                        source_dir,
+                        interval.as_secs()
+                    );
+                    interval
+                } else {
+                    Duration::from_secs(0)
+                };
+
+                let mut last_backup_time: Option<std::time::Instant> = None;
+
+                loop {
+                    let now = chrono::Utc::now();
+                    if let Some(next) = schedule.upcoming(chrono::Utc).next() {
+                        let wait_duration = (next - now).to_std().unwrap_or(Duration::from_secs(60));
+                        sleep(wait_duration).await;
+
+                        // Enforce minimum interval
+                        if let Some(last) = last_backup_time {
+                            let elapsed = last.elapsed();
+                            if elapsed < min_interval {
+                                let remaining = min_interval - elapsed;
+                                info!(
+                                    "Source {:?}: min interval not reached, waiting {}s more",
+                                    source_dir,
+                                    remaining.as_secs()
+                                );
+                                sleep(remaining).await;
+                            }
+                        }
+
+                        info!("Cron triggered backup for source: {:?}", source_dir);
+                        if let Err(e) = backup_tx.send(()).await {
+                            error!("Failed to send cron backup trigger: {}", e);
+                            break;
+                        }
+                        last_backup_time = Some(std::time::Instant::now());
+                    } else {
+                        sleep(Duration::from_secs(60)).await;
+                    }
+                }
+            });
+            cron_tasks.push(task);
+        }
+    }
 
     let watcher_task = if config.enable_event_driven && matches!(config.backup_mode, config::BackupMode::Delta) {
         let watch_paths: Vec<PathBuf> = config.sources
@@ -412,7 +507,10 @@ async fn handle_run() -> Result<()> {
         info!("Running in copy mode - event-driven backup is disabled, periodic backup only");
     }
 
-    info!("Ardiex backup service started (mode: {:?})", config.backup_mode);
+    info!(
+        "Ardiex backup service started (mode: {:?}, cron: {}, min_interval_by_size: {})",
+        config.backup_mode, config.cron_schedule, config.enable_min_interval_by_size
+    );
 
     loop {
         tokio::select! {
@@ -441,7 +539,7 @@ async fn handle_run() -> Result<()> {
         }
     }
 
-    if let Some(task) = periodic_task {
+    for task in &cron_tasks {
         task.abort();
     }
     if let Some(task) = watcher_task {

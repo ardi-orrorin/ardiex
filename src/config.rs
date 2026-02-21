@@ -31,11 +31,23 @@ pub struct BackupConfig {
     pub backup_mode: BackupMode,
     #[serde(default = "default_full_backup_interval")]
     pub full_backup_interval: usize,
+    #[serde(default = "default_cron_schedule")]
+    pub cron_schedule: String,
+    #[serde(default = "default_true")]
+    pub enable_min_interval_by_size: bool,
     pub metadata: HashMap<String, SourceMetadata>,
 }
 
 fn default_full_backup_interval() -> usize {
     10
+}
+
+fn default_cron_schedule() -> String {
+    "0 0 * * * *".to_string() // every hour
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +63,8 @@ pub struct SourceConfig {
     pub backup_mode: Option<BackupMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_backup_interval: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cron_schedule: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +73,7 @@ pub struct ResolvedSourceConfig {
     pub max_backups: usize,
     pub backup_mode: BackupMode,
     pub full_backup_interval: usize,
+    pub cron_schedule: String,
 }
 
 impl SourceConfig {
@@ -68,6 +83,7 @@ impl SourceConfig {
             max_backups: self.max_backups.unwrap_or(global.max_backups),
             backup_mode: self.backup_mode.clone().unwrap_or_else(|| global.backup_mode.clone()),
             full_backup_interval: self.full_backup_interval.unwrap_or(global.full_backup_interval),
+            cron_schedule: self.cron_schedule.clone().unwrap_or_else(|| global.cron_schedule.clone()),
         }
     }
 }
@@ -95,6 +111,8 @@ impl Default for BackupConfig {
             max_backups: 10,
             backup_mode: BackupMode::Delta,
             full_backup_interval: 10,
+            cron_schedule: "0 0 * * * *".to_string(),
+            enable_min_interval_by_size: true,
             metadata: HashMap::new(),
         }
     }
@@ -158,6 +176,7 @@ impl ConfigManager {
             max_backups: None,
             backup_mode: None,
             full_backup_interval: None,
+            cron_schedule: None,
         };
 
         if let Some(existing) = self.config.sources.iter_mut()

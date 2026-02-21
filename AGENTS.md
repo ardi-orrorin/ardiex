@@ -1,6 +1,6 @@
 ---
 name: ardiex-assistant
-description: Ardiex 증분 백업 시스템 전문가. 주기적/이벤트 기반 백업, 다중 소스/백업 경로 관리, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, 파일 시스템 감시(notify), Tokio 비동기 처리, Rust 프로젝트 구조에 대한 질문에 답변하고 작업을 수행합니다.
+description: Ardiex 증분 백업 시스템 전문가. 주기적/이벤트 기반 백업, 다중 소스/백업 경로 관리, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, 파일 시스템 감시(notify), Tokio 비동기 처리, Rust 프로젝트 구조에 대한 질문에 답변하고 작업을 수행합니다.
 ---
 
 # Ardiex 프로젝트 - AI 에이전트 가이드
@@ -61,11 +61,13 @@ ardiex/
 - 여러 소스 디렉토리 동시 관리
 - 각 소스별 여러 백업 위치 지원 가능
 - 백업 경로 미지정 시 `.backup` 디렉토리 사용
+- **모든 경로는 절대경로 필수** (`ensure_absolute()` 검증)
 
 #### 트리거 방식
 
-1. **주기적**: Tokio 타이머로 설정된 간격마다 실행
+1. **Cron 스케줄링**: crontab 표현식으로 소스별 개별 스케줄링
 2. **이벤트 기반**: notify crate로 파일 변경 감지 시 실행 (delta 모드만)
+3. **용량 기반 최소 주기**: ~10MB→1초, ~100MB→1분, ~1GB→1시간, 이후 GB당 1시간
 
 ### 3. 주요 작업별 코드 위치
 
@@ -80,12 +82,14 @@ ardiex/
 #### 백업 실행 작업
 
 - 파일: `src/backup.rs`
-- 함수: `BackupManager::backup_all_sources()`, `backup_source()`, `perform_backup_to_dir()`
+- 함수: `BackupManager::validate_all_sources()`, `backup_all_sources()`, `backup_source()`, `perform_backup_to_dir()`
+- 시작 시 검증: `validate_all_sources()`로 delta chain + full interval 사전 검증, `force_full_dirs`에 결과 저장
 - 해시 계산: SHA-256 사용
 - Delta 백업: `find_latest_backup_file()`로 이전 백업 찾아 블록 비교
-- Full 강제: `count_inc_since_last_full()`, `validate_delta_chain()`
+- Full 강제: 시작 시 `count_inc_since_last_full()`, `validate_delta_chain()`으로 판단
 - 모드 분기: `use_delta` 플래그로 delta/copy 모드 처리
 - 진행률: 10% 단위 로깅
+- 용량 계산: `calculate_min_interval_by_size()`, `calculate_dir_size()`
 
 #### Delta 백업/복원 작업
 
@@ -118,8 +122,11 @@ ardiex/
 - 구조: clap의 Parser, Subcommand
 - 명령어: config, backup, restore, run
 - config 하위: init, list, add-source, remove-source, add-backup, remove-backup, set, set-source
-- set: 글로벌 설정 (backup_mode, full_backup_interval 등)
-- set-source: 소스별 설정 ("reset"으로 초기화 가능)
+- set: 글로벌 설정 (backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size 등)
+- set-source: 소스별 설정 (cron_schedule 포함, "reset"으로 초기화 가능)
+- cron 스케줄러: 소스별 개별 tokio task로 스케줄링, 용량 기반 최소 주기 적용
+- 경로 검증: `ensure_absolute()`로 모든 경로 입력 절대경로 강제
+- 시작 시 검증: `handle_backup()`, `handle_run()`에서 `validate_all_sources()` 호출
 
 ### 4. 자주 발생하는 작업 패턴
 
@@ -227,6 +234,8 @@ cargo test --test integration
 - ~~주기적 full 강제~~ (구현 완료)
 - ~~delta 체인 검증~~ (구현 완료)
 - ~~진행률 로깅~~ (구현 완료)
+- ~~cron 스케줄링~~ (구현 완료)
+- ~~용량 기반 최소 백업 주기~~ (구현 완료)
 
 ## 자주 묻는 질문
 

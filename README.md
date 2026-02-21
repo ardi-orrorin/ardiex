@@ -20,8 +20,24 @@
 
 ### 2. 트리거 방식
 
-- **주기적 백업**: 설정된 시간 간격으로 자동 실행
-- **I/O 이벤트 기반**: 파일 시스템 변경 감지 시 즉시 실행
+- **Cron 스케줄링**: crontab 표현식으로 백업 주기 설정 (글로벌/소스별)
+- **I/O 이벤트 기반**: 파일 시스템 변경 감지 시 즉시 실행 (delta 모드만)
+- **용량 기반 최소 주기**: 소스 디렉토리 크기에 따라 최소 백업 간격 자동 적용
+
+### 3. 용량 기반 최소 백업 주기
+
+| 소스 용량 | 최소 주기                    |
+| --------- | ---------------------------- |
+| ~10MB     | 1초                          |
+| ~100MB    | 1분                          |
+| ~1GB      | 1시간                        |
+| 1GB 초과  | GB당 1시간 (ex: 3GB → 3시간) |
+
+> `enable_min_interval_by_size: false`로 비활성화 가능
+
+### 4. Cron 스케줄링
+
+[crontab.guru](https://crontab.guru) 참고
 
 ## 설정 파일 (settings.json)
 
@@ -29,6 +45,7 @@
 
 - 실행 파일과 동일한 경로
 - 없으면 기본값으로 자동 생성
+- 절대 경로로 설정
 
 ### 구조
 
@@ -36,16 +53,17 @@
 {
   "sources": [
     {
-      "source_dir": "./documents",
-      "backup_dirs": ["./documents/.backup", "/backup/documents"],
+      "source_dir": "/home/user/documents",
+      "backup_dirs": ["/backup/documents", "/mnt/external/documents"],
       "enabled": true,
       "exclude_patterns": ["*.cache"],
       "max_backups": 5,
       "backup_mode": "copy",
-      "full_backup_interval": 3
+      "full_backup_interval": 3,
+      "cron_schedule": "0 */5 * * * *"
     },
     {
-      "source_dir": "./photos",
+      "source_dir": "/home/user/photos",
       "backup_dirs": ["/backup/photos"],
       "enabled": true
     }
@@ -57,6 +75,8 @@
   "max_backups": 10,
   "backup_mode": "delta",
   "full_backup_interval": 10,
+  "cron_schedule": "0 0 * * * *",
+  "enable_min_interval_by_size": true,
   "metadata": {
     "./documents": {
       "last_full_backup": "2024-02-21T10:00:00Z",
@@ -146,7 +166,7 @@ cargo build --release
 # 백업 서비스 시작 (Ctrl+C로 종료)
 ./ardiex run
 
-# 주기적 백업 (기본 60분)과 파일 변경 감지 백업이 동시에 실행됨
+# cron 스케줄 기반 백업과 파일 변경 감지 백업이 동시에 실행됨
 ```
 
 ### 5. 설정 변경
@@ -159,15 +179,19 @@ cargo build --release
 ./ardiex config set max_backups 20
 ./ardiex config set backup_mode delta          # delta 또는 copy
 ./ardiex config set full_backup_interval 10    # N번 inc 후 full 강제
+./ardiex config set cron_schedule "0 */30 * * * *"  # 30분마다 (초 분 시 일 월 요일)
+./ardiex config set enable_min_interval_by_size false  # 용량 기반 최소 주기 비활성화
 
 # 소스별 설정 (글로벌 오버라이드)
 ./ardiex config set-source /home/user/documents backup_mode copy
 ./ardiex config set-source /home/user/documents max_backups 5
 ./ardiex config set-source /home/user/documents full_backup_interval 3
 ./ardiex config set-source /home/user/documents exclude_patterns "*.cache,*.tmp"
+./ardiex config set-source /home/user/documents cron_schedule "0 */5 * * * *"  # 5분마다
 
 # 소스별 설정 초기화 (글로벌로 폴백)
 ./ardiex config set-source /home/user/documents backup_mode reset
+./ardiex config set-source /home/user/documents cron_schedule reset
 ```
 
 ### 설정 우선순위
@@ -180,6 +204,7 @@ cargo build --release
 | `max_backups`          | `10`             | 지정 시 오버라이드 |
 | `backup_mode`          | `"delta"`        | 지정 시 오버라이드 |
 | `full_backup_interval` | `10`             | 지정 시 오버라이드 |
+| `cron_schedule`        | `"0 0 * * * *"`  | 지정 시 오버라이드 |
 
 ### 6. 백업 관리
 
@@ -263,6 +288,8 @@ backup/
 - **에러 처리**: anyhow
 - **해시 계산**: sha2 (SHA-256)
 - **로그 파일 회전**: file-rotate
+- **Cron 스케줄링**: cron
+- **디렉토리 탐색**: walkdir
 
 ## 주요 의존성
 

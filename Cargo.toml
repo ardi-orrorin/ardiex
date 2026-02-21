@@ -16,6 +16,7 @@ anyhow = "1.0"
 sha2 = "0.10"
 file-rotate = "0.7"
 walkdir = "2.5"
+cron = "0.12"
 
 [profile.release]
 lto = "fat"

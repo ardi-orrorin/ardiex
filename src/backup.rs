@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use tokio::task;
 use crate::config::{BackupConfig, BackupMode, ResolvedSourceConfig, SourceConfig, SourceMetadata};
 use crate::delta;
+use std::time::Duration as StdDuration;
 
 #[derive(Debug)]
 pub enum BackupType {
@@ -30,11 +31,195 @@ pub struct BackupResult {
 
 pub struct BackupManager {
     config: BackupConfig,
+    force_full_dirs: HashMap<PathBuf, bool>,
 }
 
 impl BackupManager {
     pub fn new(config: BackupConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            force_full_dirs: HashMap::new(),
+        }
+    }
+
+    /// Validate all sources at program startup.
+    /// Checks delta chain integrity and full_backup_interval for each backup directory.
+    /// Sets force_full flag per backup_dir so subsequent backups know to force full.
+    pub fn validate_all_sources(&mut self) -> Result<()> {
+        use std::collections::HashSet;
+        use std::str::FromStr;
+
+        info!("Starting pre-flight validation of all backup sources...");
+        let config = self.config.clone();
+
+        // ── Global config validation ──
+
+        // Validate global cron_schedule
+        cron::Schedule::from_str(&config.cron_schedule)
+            .map_err(|e| anyhow::anyhow!(
+                "Invalid global cron_schedule '{}': {}",
+                config.cron_schedule, e
+            ))?;
+
+        // Validate global numeric values
+        if config.max_backups == 0 {
+            return Err(anyhow::anyhow!("Global max_backups must be > 0"));
+        }
+        if config.full_backup_interval == 0 {
+            return Err(anyhow::anyhow!("Global full_backup_interval must be > 0"));
+        }
+
+        // ── Per-source validation ──
+
+        let mut seen_sources: HashSet<PathBuf> = HashSet::new();
+
+        for source in &config.sources {
+            // Duplicate source check
+            if !seen_sources.insert(source.source_dir.clone()) {
+                return Err(anyhow::anyhow!(
+                    "Duplicate source directory: {:?}",
+                    source.source_dir
+                ));
+            }
+
+            // Source path must be absolute
+            if !source.source_dir.is_absolute() {
+                return Err(anyhow::anyhow!(
+                    "Source path must be absolute: {:?}",
+                    source.source_dir
+                ));
+            }
+
+            if !source.enabled {
+                continue;
+            }
+
+            // Source directory must exist
+            if !source.source_dir.exists() {
+                return Err(anyhow::anyhow!(
+                    "Source directory does not exist: {:?}",
+                    source.source_dir
+                ));
+            }
+
+            // Source must be a directory
+            if !source.source_dir.is_dir() {
+                return Err(anyhow::anyhow!(
+                    "Source path is not a directory: {:?}",
+                    source.source_dir
+                ));
+            }
+
+            // Validate source-level overrides
+            if let Some(mb) = source.max_backups {
+                if mb == 0 {
+                    return Err(anyhow::anyhow!(
+                        "Source {:?}: max_backups must be > 0",
+                        source.source_dir
+                    ));
+                }
+            }
+            if let Some(fbi) = source.full_backup_interval {
+                if fbi == 0 {
+                    return Err(anyhow::anyhow!(
+                        "Source {:?}: full_backup_interval must be > 0",
+                        source.source_dir
+                    ));
+                }
+            }
+            if let Some(ref cs) = source.cron_schedule {
+                cron::Schedule::from_str(cs)
+                    .map_err(|e| anyhow::anyhow!(
+                        "Source {:?}: invalid cron_schedule '{}': {}",
+                        source.source_dir, cs, e
+                    ))?;
+            }
+
+            // Backup dirs validation
+            let backup_dirs = if source.backup_dirs.is_empty() {
+                vec![source.source_dir.join(".backup")]
+            } else {
+                source.backup_dirs.clone()
+            };
+
+            let mut seen_backup_dirs: HashSet<PathBuf> = HashSet::new();
+            for backup_dir in &backup_dirs {
+                // Backup path must be absolute
+                if !backup_dir.is_absolute() {
+                    return Err(anyhow::anyhow!(
+                        "Backup path must be absolute: {:?} (source: {:?})",
+                        backup_dir, source.source_dir
+                    ));
+                }
+
+                // Duplicate backup dir check
+                if !seen_backup_dirs.insert(backup_dir.clone()) {
+                    return Err(anyhow::anyhow!(
+                        "Duplicate backup directory: {:?} (source: {:?})",
+                        backup_dir, source.source_dir
+                    ));
+                }
+
+                // Source and backup must not be the same
+                if *backup_dir == source.source_dir {
+                    return Err(anyhow::anyhow!(
+                        "Backup directory cannot be the same as source: {:?}",
+                        backup_dir
+                    ));
+                }
+
+                // Backup directory must exist
+                if !backup_dir.exists() {
+                    return Err(anyhow::anyhow!(
+                        "Backup directory does not exist: {:?} (source: {:?})",
+                        backup_dir, source.source_dir
+                    ));
+                }
+
+                // Backup must be a directory
+                if !backup_dir.is_dir() {
+                    return Err(anyhow::anyhow!(
+                        "Backup path is not a directory: {:?} (source: {:?})",
+                        backup_dir, source.source_dir
+                    ));
+                }
+            }
+
+            // ── Delta chain / full interval validation ──
+            let resolved = source.resolve(&config);
+            for backup_dir in &backup_dirs {
+                let mut needs_full = false;
+
+                if matches!(resolved.backup_mode, BackupMode::Delta) {
+                    let inc_count = Self::count_inc_since_last_full(backup_dir);
+                    if inc_count >= resolved.full_backup_interval {
+                        info!(
+                            "[{:?}] Full backup interval reached ({} inc backups), will force full",
+                            backup_dir, inc_count
+                        );
+                        needs_full = true;
+                    }
+
+                    if !needs_full {
+                        let chain_valid = Self::validate_delta_chain(backup_dir);
+                        if !chain_valid {
+                            warn!(
+                                "[{:?}] Delta chain integrity check failed, will force full",
+                                backup_dir
+                            );
+                            needs_full = true;
+                        }
+                    }
+                }
+
+                if needs_full {
+                    self.force_full_dirs.insert(backup_dir.clone(), true);
+                }
+                info!("[{:?}] Validation complete (force_full: {})", backup_dir, needs_full);
+            }
+        }
+        info!("Pre-flight validation complete.");
+        Ok(())
     }
 
     pub async fn backup_all_sources(&mut self) -> Result<Vec<BackupResult>> {
@@ -53,8 +238,9 @@ impl BackupManager {
                     source.backup_dirs.clone()
                 };
                 
+                let force_full_dirs = self.force_full_dirs.clone();
                 task::spawn(async move {
-                    Self::backup_source(source, backup_dirs, resolved).await
+                    Self::backup_source(source, backup_dirs, resolved, force_full_dirs).await
                 })
             })
             .collect();
@@ -79,17 +265,19 @@ impl BackupManager {
         source: SourceConfig,
         backup_dirs: Vec<PathBuf>,
         resolved: ResolvedSourceConfig,
+        force_full_dirs: HashMap<PathBuf, bool>,
     ) -> Result<Vec<BackupResult>> {
         let mut results = Vec::new();
         
-        for backup_dir in backup_dirs {
+        for backup_dir in &backup_dirs {
+            let force_full = force_full_dirs.get(backup_dir).copied().unwrap_or(false);
             let result = Self::perform_backup_to_dir(
                 &source.source_dir,
-                &backup_dir,
+                backup_dir,
                 &resolved.exclude_patterns,
                 resolved.max_backups,
                 &resolved.backup_mode,
-                resolved.full_backup_interval,
+                force_full,
             ).await?;
             results.push(result);
         }
@@ -103,7 +291,7 @@ impl BackupManager {
         exclude_patterns: &[String],
         max_backups: usize,
         backup_mode: &BackupMode,
-        full_backup_interval: usize,
+        force_full: bool,
     ) -> Result<BackupResult> {
         let start_time = std::time::Instant::now();
         
@@ -132,21 +320,10 @@ impl BackupManager {
             exclude_patterns,
         )?;
 
-        // Delta mode: check full_backup_interval and validate delta chain
-        if matches!(backup_mode, BackupMode::Delta) && matches!(backup_type, BackupType::Incremental) {
-            // Count consecutive inc backups since last full
-            let inc_count = Self::count_inc_since_last_full(backup_dir);
-            if inc_count >= full_backup_interval {
-                info!("Full backup interval reached ({} inc backups), forcing full backup", inc_count);
-                backup_type = BackupType::Full;
-            } else {
-                // Validate existing delta chain integrity
-                let chain_valid = Self::validate_delta_chain(backup_dir);
-                if !chain_valid {
-                    warn!("Delta chain integrity check failed, forcing full backup");
-                    backup_type = BackupType::Full;
-                }
-            }
+        // Apply force_full flag from startup validation
+        if force_full && matches!(backup_type, BackupType::Incremental) {
+            info!("Forcing full backup based on startup validation");
+            backup_type = BackupType::Full;
         }
 
         // Copy mode: always use file copy (no delta)
@@ -499,6 +676,43 @@ impl BackupManager {
         }
 
         true
+    }
+
+    /// Calculate minimum backup interval based on source directory size.
+    /// - up to 10MB: 1 second
+    /// - up to 100MB: 1 minute
+    /// - up to 1GB: 1 hour
+    /// - above 1GB: 1 hour per GB
+    pub fn calculate_min_interval_by_size(source_dir: &Path) -> StdDuration {
+        let total_bytes = Self::calculate_dir_size(source_dir);
+        let mb = total_bytes as f64 / (1024.0 * 1024.0);
+        let gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+        if mb <= 10.0 {
+            StdDuration::from_secs(1)
+        } else if mb <= 100.0 {
+            StdDuration::from_secs(60)
+        } else if gb <= 1.0 {
+            StdDuration::from_secs(3600)
+        } else {
+            let hours = gb.ceil() as u64;
+            StdDuration::from_secs(hours * 3600)
+        }
+    }
+
+    fn calculate_dir_size(dir: &Path) -> u64 {
+        let mut total: u64 = 0;
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    total += Self::calculate_dir_size(&path);
+                } else if let Ok(meta) = fs::metadata(&path) {
+                    total += meta.len();
+                }
+            }
+        }
+        total
     }
 
     fn validate_delta_files_in_dir(dir: &Path) -> Result<()> {

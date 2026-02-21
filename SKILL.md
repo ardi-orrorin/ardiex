@@ -1,6 +1,6 @@
 ---
 name: ardiex
-description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 기반 백업, 다중 소스/백업 경로, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, JSON 설정 파일, 파일 시스템 감시(notify), Tokio 비동기 처리가 필요한 작업에 사용.
+description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 기반 백업, 다중 소스/백업 경로, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, JSON 설정 파일, 파일 시스템 감시(notify), Tokio 비동기 처리가 필요한 작업에 사용.
 ---
 
 # Ardiex 백업 프로그램 기술 명세
@@ -9,8 +9,9 @@ description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 �
 
 ### 1. Rust 비동기 프로그래밍
 
-- **Tokio**: 비동기 런타임으로 주기적 타이머 및 이벤트 처리
+- **Tokio**: 비동기 런타임으로 cron 스케줄링 및 이벤트 처리
 - **Async/Await**: 동시성 처리 (백업 실행, 파일 감시, CLI 처리)
+- **cron crate**: crontab 표현식 파싱 및 다음 실행 시간 계산 (7필드: 초 분 시 일 월 요일 년)
 
 ### 2. 파일 시스템 감시
 
@@ -50,6 +51,19 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 
 - 백업/복구 시 10% 단위로 진행률 로그 기록
 - 파일 수 기반 비율 계산
+
+### 4-4. Cron 스케줄링
+
+- 글로벌 `cron_schedule` + 소스별 `cron_schedule` 오버라이드
+- `cron` crate로 파싱, `schedule.upcoming(Utc).next()`로 다음 실행 시간 계산
+- 소스별 개별 tokio task로 스케줄링
+
+### 4-5. 용량 기반 최소 백업 주기
+
+- 소스 디렉토리 크기 재귀적 계산
+- ~10MB: 1초, ~100MB: 1분, ~1GB: 1시간, 이후 GB당 1시간
+- `enable_min_interval_by_size`로 on/off
+- cron 트리거 후 최소 주기 미달 시 대기
 
 ```rust
 // delta.rs 핵심 함수
@@ -92,6 +106,7 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - **실행 파일 경로**: std::env::current_exe()로 설정 파일 위치 결정
 - **글로벌/소스별 설정**: `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - **소스별 설정 필드**: `Option<T>`로 선언, `#[serde(default, skip_serializing_if = "Option::is_none")]`
+- **cron_schedule**: 글로벌 + 소스별 오버라이드, `cron::Schedule::from_str()`로 검증
 
 ## 구현 패턴
 
@@ -116,12 +131,14 @@ impl ConfigManager {
 ```rust
 pub struct BackupManager {
     config: BackupConfig,
+    force_full_dirs: HashMap<PathBuf, bool>,  // 시작 시 검증 결과
 }
 
 impl BackupManager {
-    pub async fn backup_all_sources(&self) -> Result<Vec<BackupResult>>
-    async fn backup_source(source, backup_dirs, resolved: ResolvedSourceConfig) -> Result<Vec<BackupResult>>
-    async fn perform_backup_to_dir(source, backup, exclude, max, mode, interval) -> Result<BackupResult>
+    pub fn validate_all_sources(&mut self)  // 프로그램 시작 시 delta chain + full interval 검증
+    pub async fn backup_all_sources(&mut self) -> Result<Vec<BackupResult>>
+    async fn backup_source(source, backup_dirs, resolved, force_full_dirs) -> Result<Vec<BackupResult>>
+    async fn perform_backup_to_dir(source, backup, exclude, max, mode, force_full) -> Result<BackupResult>
     fn count_inc_since_last_full(backup_dir: &Path) -> usize
     fn validate_delta_chain(backup_dir: &Path) -> bool
     fn find_latest_backup_file(backup_dir: &Path, relative: &Path) -> Option<PathBuf>
@@ -230,9 +247,12 @@ enum Commands {
 enum ConfigAction {
     Init, List, AddSource, RemoveSource,
     AddBackup, RemoveBackup,
-    Set { key, value },           // 글로벌 설정
-    SetSource { source, key, value },  // 소스별 설정
+    Set { key, value },           // 글로벌 설정 (cron_schedule, enable_min_interval_by_size 포함)
+    SetSource { source, key, value },  // 소스별 설정 (cron_schedule 포함)
 }
+
+// 모든 경로 입력은 절대경로 필수 (ensure_absolute() 검증)
+// 프로그램 시작 시 validate_all_sources()로 delta chain + full interval 사전 검증
 ```
 
 ### 2. 컬러 출력
