@@ -261,7 +261,8 @@ impl BackupManager {
             now,
             files_backed_up,
             bytes_processed,
-        );
+            &backup_path,
+        )?;
 
         Self::cleanup_old_backups(backup_dir, max_backups, backup_mode)?;
         Self::synchronize_metadata_history_with_disk(backup_dir, &mut metadata)?;

@@ -39,7 +39,7 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 ### 4-1. 백업 모드 (delta / copy)
 
 - **delta 모드**: 블록 단위 diff 백업, 주기적 + 실시간 지원
-- **copy 모드**: 변경 파일 전체 복사, 주기적 백업만 지원 (실시간 비활성화)
+- **copy 모드**: 변경 파일 전체 복사, 주기적 + 실시간 지원
 - **글로벌/소스별 설정**: 소스별 설정이 글로벌 오버라이드
 
 ### 4-2. Delta 체인 무결성 검증
@@ -65,6 +65,13 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 - ~10MB: 1초, ~100MB: 1분, ~1GB: 1시간, 이후 GB당 1시간
 - `enable_min_interval_by_size`로 on/off
 - cron 트리거 후 최소 주기 미달 시 대기
+
+### 4-6. 메타데이터 이력/체크섬 검증
+
+- `backup_history`는 디스크의 `full_*/inc_*` 디렉토리와 1:1로 일치해야 함
+- `inc` 백업은 `inc_checksum`을 metadata에 기록
+- 프로그램 시작(`backup`, `run`) 시 `inc_checksum`과 실제 `inc` 디렉토리 체크섬을 검증
+- 불일치 감지 시 해당 백업 경로를 `force_full`로 표시하여 다음 백업을 full로 강제
 
 ```rust
 // delta.rs 핵심 함수
@@ -115,6 +122,7 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - **로그 회전 설정**: 글로벌 `max_log_file_size_mb` (기본 20)
 - **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
 - **자동 계산 필드**: `full_backup_interval`은 `max_backups` 기반으로 내부 계산되며 설정 파일/에디터에 저장되지 않음
+- **메타데이터 확장 필드**: `backup_history[].inc_checksum` (incremental 백업 체크섬)
 
 ### 9. run 런타임 핫리로드
 
@@ -163,7 +171,7 @@ impl BackupManager {
 ```
 
 - `src/backup/file_ops.rs`: 파일 스캔/변경감지/해시/보관 정리
-- `src/backup/metadata.rs`: metadata 로드/동기화/backup_history 검증
+- `src/backup/metadata.rs`: metadata 로드/동기화/backup_history + inc_checksum 검증
 - `src/backup/validation.rs`: 시작 시 설정/경로/delta chain 검증
 
 ### 3. 파일 감시자 패턴

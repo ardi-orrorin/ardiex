@@ -138,6 +138,8 @@ pub struct BackupHistoryEntry {
     pub created_at: DateTime<Utc>,
     pub files_backed_up: usize,
     pub bytes_processed: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inc_checksum: Option<String>,
 }
 
 impl Default for BackupConfig {
