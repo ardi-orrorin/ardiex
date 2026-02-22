@@ -3,9 +3,9 @@ use log::{error, info, warn};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 use tokio::sync::mpsc as tokio_mpsc;
-use std::thread;
 
 pub struct FileWatcher {
     _watchers: Vec<RecommendedWatcher>,
@@ -29,15 +29,13 @@ impl FileWatcher {
 
             let (tx, rx) = mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
-                move |res: Result<Event, notify::Error>| {
-                    match res {
-                        Ok(event) => {
-                            if let Err(e) = tx.send(event) {
-                                error!("Failed to send file system event: {}", e);
-                            }
+                move |res: Result<Event, notify::Error>| match res {
+                    Ok(event) => {
+                        if let Err(e) = tx.send(event) {
+                            error!("Failed to send file system event: {}", e);
                         }
-                        Err(e) => error!("File system watch error: {:?}", e),
                     }
+                    Err(e) => error!("File system watch error: {:?}", e),
                 },
                 Config::default(),
             )?;
@@ -47,11 +45,10 @@ impl FileWatcher {
             info!("Started watching: {:?}", path);
             let backup_tx_clone = backup_tx.clone();
             let debounce = debounce_duration;
-            
+
             thread::spawn(move || {
                 Self::debounce_events(rx, backup_tx_clone, debounce);
             });
-
         }
 
         Ok(Self {
@@ -105,18 +102,16 @@ impl FileWatcher {
     fn should_trigger_backup(event: &Event) -> bool {
         match &event.kind {
             EventKind::Create(_) => true,
-            EventKind::Modify(_) => {
-                !event.paths.iter().any(|p| {
-                    if let Some(name) = p.file_name() {
-                        let name_str = name.to_string_lossy();
-                        name_str.ends_with(".tmp") || 
-                        name_str.ends_with(".swp") ||
-                        name_str.ends_with(".lock")
-                    } else {
-                        false
-                    }
-                })
-            }
+            EventKind::Modify(_) => !event.paths.iter().any(|p| {
+                if let Some(name) = p.file_name() {
+                    let name_str = name.to_string_lossy();
+                    name_str.ends_with(".tmp")
+                        || name_str.ends_with(".swp")
+                        || name_str.ends_with(".lock")
+                } else {
+                    false
+                }
+            }),
             EventKind::Remove(_) => true,
             _ => false,
         }

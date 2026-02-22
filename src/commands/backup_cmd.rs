@@ -11,7 +11,7 @@ pub async fn handle_backup() -> Result<()> {
 
     info!("Starting manual backup");
     backup_manager.validate_all_sources()?;
-    
+
     match backup_manager.backup_all_sources().await {
         Ok(results) => {
             for result in results {

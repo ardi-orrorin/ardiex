@@ -11,7 +11,7 @@ description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 �
 
 - **Tokio**: 비동기 런타임으로 cron 스케줄링 및 이벤트 처리
 - **Async/Await**: 동시성 처리 (백업 실행, 파일 감시, CLI 처리)
-- **cron crate**: crontab 표현식 파싱 및 다음 실행 시간 계산 (7필드: 초 분 시 일 월 요일 년)
+- **cron crate**: crontab 표현식 파싱 및 다음 실행 시간 계산 (기본 6필드: 초 분 시 일 월 요일)
 
 ### 2. 파일 시스템 감시
 
@@ -32,7 +32,8 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 
 - **블록 크기**: 4KB 단위로 파일 분할
 - **블록 해시 비교**: 이전 백업과 현재 파일의 각 블록 SHA-256 해시 비교
-- **자동 판단**: delta 크기가 원본의 50% 미만이면 delta 저장, 아니면 전체 복사
+- **Delta 생성 조건**: delta 모드 + 이전 백업 파일이 존재할 때 `.delta` 생성
+- **Fallback**: 이전 파일이 없으면 전체 파일 복사
 - **복원**: 원본 파일 + delta 블록 병합으로 복원
 
 ### 4-1. 백업 모드 (delta / copy)
@@ -45,7 +46,7 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 
 - 백업 시작 시 기존 inc 디렉토리의 .delta 파일을 모두 로드 검증
 - 손상 감지 시 자동으로 full 백업으로 전환
-- `full_backup_interval` 도달 시에도 full 강제
+- 자동 계산된 `full_backup_interval` 도달 시에도 full 강제
 
 ### 4-3. 진행률 로깅
 
@@ -91,7 +92,11 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 ### 6. 파일 로깅
 
 - **로그 위치**: 실행 파일 경로의 `logs/ardiex.log`
-- **기록 내용**: 백업 시작/완료, 복구, 에러, delta 정보
+- **시간 포맷**: 로컬타임 `%Y-%m-%d %H:%M:%S%.3f`
+- **회전 정책**: `max_log_file_size_mb` 초과 시 회전
+- **회전 파일명**: 날짜 suffix `%Y-%m-%d_%H-%M-%S`
+- **압축**: 회전 시 gzip 압축(`Compression::OnRotate(1)`), 최대 30개 보관
+- **기록 내용**: 백업 시작/완료, 복구, 에러, delta 정보, 핫리로드 상태
 
 ### 7. SHA-256 해시 계산
 
@@ -107,7 +112,17 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - **글로벌/소스별 설정**: `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - **소스별 설정 필드**: `Option<T>`로 선언, `#[serde(default, skip_serializing_if = "Option::is_none")]`
 - **cron_schedule**: 글로벌 + 소스별 오버라이드, `cron::Schedule::from_str()`로 검증
-- **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- **로그 회전 설정**: 글로벌 `max_log_file_size_mb` (기본 20)
+- **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- **자동 계산 필드**: `full_backup_interval`은 `max_backups` 기반으로 내부 계산되며 설정 파일/에디터에 저장되지 않음
+
+### 9. run 런타임 핫리로드
+
+- `run` 실행 중 2초 간격으로 `settings.json` 변경 감지
+- 변경 감지 시 `[HOT-RELOAD]` 로그를 남기고 새 설정 검증
+- 유효하면 스케줄러/워처 task를 재생성하여 즉시 반영
+- 무효하면 기존 설정을 유지하고 거부 로그 남김
+- 시작 시/핫리로드 시 `[CONFIG]` pretty JSON 스냅샷 출력
 
 ## 구현 패턴
 
@@ -122,21 +137,22 @@ pub struct ConfigManager {
 impl ConfigManager {
     pub fn load_or_create() -> Result<Self>
     pub fn save(&mut self) -> Result<()>
-    pub fn add_source(&mut self, source: SourceConfig) -> Result<()>
-    pub fn remove_source(&mut self, source_path: &str) -> Result<()>
+    pub fn add_source(&mut self, source_dir: PathBuf, backup_dirs: Vec<PathBuf>) -> Result<()>
+    pub fn remove_source(&mut self, source_dir: &Path) -> Result<()>
 }
 ```
 
 ### 2. 백업 관리자 패턴
 
 ```rust
+// src/backup/mod.rs
 pub struct BackupManager {
     config: BackupConfig,
     force_full_dirs: HashMap<PathBuf, bool>,  // 시작 시 검증 결과
 }
 
 impl BackupManager {
-    pub fn validate_all_sources(&mut self)  // 프로그램 시작 시 delta chain + full interval 검증
+    pub fn validate_all_sources(&mut self)  // 프로그램 시작 시 delta chain + auto full interval 검증
     pub async fn backup_all_sources(&mut self) -> Result<Vec<BackupResult>>
     async fn backup_source(source, backup_dirs, resolved, force_full_dirs) -> Result<Vec<BackupResult>>
     async fn perform_backup_to_dir(source, backup, exclude, max, mode, force_full) -> Result<BackupResult>
@@ -145,6 +161,10 @@ impl BackupManager {
     fn find_latest_backup_file(backup_dir: &Path, relative: &Path) -> Option<PathBuf>
 }
 ```
+
+- `src/backup/file_ops.rs`: 파일 스캔/변경감지/해시/보관 정리
+- `src/backup/metadata.rs`: metadata 로드/동기화/backup_history 검증
+- `src/backup/validation.rs`: 시작 시 설정/경로/delta chain 검증
 
 ### 3. 파일 감시자 패턴
 
@@ -201,9 +221,10 @@ impl RestoreManager {
 
 ```rust
 // 예시
-INFO [2024-02-21 10:00:00] Starting backup for source: ./documents
-WARN [2024-02-21 10:00:05] Failed to backup file: ./documents/locked.tmp (Permission denied)
-ERROR [2024-02-21 10:00:10] Backup failed: Insufficient disk space
+[2026-02-21 10:00:00.123 INFO ardiex::backup] Starting backup for source: "/data/documents"
+[2026-02-21 10:00:05.456 WARN ardiex::backup] Failed to backup file: "/data/documents/locked.tmp"
+[2026-02-21 10:00:10.789 ERROR ardiex::backup] Backup failed: Insufficient disk space
+[2026-02-21 10:00:15.000 INFO ardiex::commands::run_cmd] [HOT-RELOAD] Applied successfully ...
 ```
 
 ## 성능 최적화
@@ -248,21 +269,25 @@ enum Commands {
 enum ConfigAction {
     Init, List, AddSource, RemoveSource,
     AddBackup, RemoveBackup,
-    Set { key, value },           // 글로벌 설정 (cron_schedule, enable_min_interval_by_size 포함)
+    Set { key, value },           // 글로벌 설정 (cron_schedule, enable_min_interval_by_size, max_log_file_size_mb 포함)
     SetSource { source, key, value },  // 소스별 설정 (cron_schedule 포함)
 }
 
 // 모든 경로 입력은 절대경로 필수 (ensure_absolute() 검증)
 // 프로그램 시작 시 validate_all_sources()로 전체 설정 검증:
 //   글로벌 값, 경로 절대/존재/디렉토리, 중복, 소스==백업 금지,
-//   소스별 오버라이드 값, cron 표현식, delta chain, full interval
+//   소스별 오버라이드 값, cron 표현식, delta chain, auto full interval
+// full_backup_interval은 수동 설정하지 않고 max_backups 기준 자동 계산
 ```
 
 ### 3. 설정 파일 웹 편집기
 
 - 위치: `src/editor/settings-editor.html`
 - 단일 HTML 파일 (외부 의존성 없음)
-- settings.json 로드/편집/저장/검증
+- `settings.json` 파일명 강제 + 로드 시 스키마 검증
+- 파일 열기 + 화면 전체 Drag & Drop 지원
+- 열기 전 저장 버튼 비활성화, 열린 파일에 덮어쓰기 저장(FS API 지원 시)
+- 설정 변경 시 JSON 미리보기 자동 갱신 + 미리보기 JSON 복사 버튼
 - 릴리스 아카이브에 포함
 
 ### 4. 컬러 출력

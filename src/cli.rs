@@ -75,11 +75,11 @@ pub enum ConfigAction {
     ///   enable_event_driven    (true/false)
     ///   max_backups            (number)
     ///   backup_mode            (delta/copy)
-    ///   full_backup_interval   (number)
     ///   cron_schedule          ("sec min hour day month dow")
     ///   enable_min_interval_by_size  (true/false)
+    ///   max_log_file_size_mb   (number, > 0)
     Set {
-        /// Key: enable_periodic, enable_event_driven, max_backups, backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size
+        /// Key: enable_periodic, enable_event_driven, max_backups, backup_mode, cron_schedule, enable_min_interval_by_size, max_log_file_size_mb
         key: String,
         /// Configuration value
         value: String,
@@ -90,16 +90,14 @@ pub enum ConfigAction {
     ///   exclude_patterns       (comma-separated, e.g. "*.cache,*.tmp")
     ///   max_backups            (number)
     ///   backup_mode            (delta/copy)
-    ///   full_backup_interval   (number)
     ///   cron_schedule          ("sec min hour day month dow")
     ///   enable_event_driven    (true/false)
     ///   enable_periodic        (true/false)
-    ///
     /// Use "reset" as value to clear and fall back to global
     SetSource {
         /// Source directory path
         source: PathBuf,
-        /// Key: exclude_patterns, max_backups, backup_mode, full_backup_interval, cron_schedule, enable_event_driven, enable_periodic (use "reset" as value to clear)
+        /// Key: exclude_patterns, max_backups, backup_mode, cron_schedule, enable_event_driven, enable_periodic (use "reset" as value to clear)
         key: String,
         /// Configuration value (use "reset" to clear override)
         value: String,

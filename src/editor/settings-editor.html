@@ -484,15 +484,15 @@
         <input type="number" id="g-max-backups" min="1" value="10" />
       </div>
       <div class="field">
+        <label>max_log_file_size_mb</label>
+        <input type="number" id="g-max-log-size" min="1" value="20" />
+      </div>
+      <div class="field">
         <label>backup_mode</label>
         <select id="g-backup-mode">
           <option value="delta">delta</option>
           <option value="copy">copy</option>
         </select>
-      </div>
-      <div class="field">
-        <label>full_backup_interval</label>
-        <input type="number" id="g-full-interval" min="1" value="10" />
       </div>
       <div class="field">
         <label>cron_schedule</label>
@@ -736,15 +736,29 @@
       let dragDepth = 0;
       const SETTINGS_FILE_NAME = "settings.json";
 
+      function normalizeAutoFullIntervals(config) {
+        if (!config || typeof config !== "object") return;
+
+        // full_backup_interval is auto-derived and should not be persisted.
+        delete config.full_backup_interval;
+
+        if (!Array.isArray(config.sources)) return;
+        config.sources.forEach((src) => {
+          if (!src || typeof src !== "object") return;
+          delete src.full_backup_interval;
+        });
+      }
+
       function getDefaultConfig() {
+        const defaultMaxBackups = 10;
         return {
           sources: [],
           enable_periodic: true,
           enable_event_driven: true,
           exclude_patterns: ["*.tmp", "*.log", ".git/*", ".DS_Store"],
-          max_backups: 10,
+          max_backups: defaultMaxBackups,
+          max_log_file_size_mb: 20,
           backup_mode: "delta",
-          full_backup_interval: 10,
           cron_schedule: "0 0 * * * *",
           enable_min_interval_by_size: true,
           metadata: {}
@@ -802,6 +816,9 @@
         try {
           const content = await file.text();
           parsed = JSON.parse(content);
+          if (parsed.max_log_file_size_mb == null) {
+            parsed.max_log_file_size_mb = 20;
+          }
         } catch (err) {
           throw new Error("유효한 JSON 형식이 아닙니다.");
         }
@@ -811,6 +828,7 @@
           throw new Error("settings.json 속성 검증 실패:\n" + schemaErrors.join("\n"));
         }
 
+        normalizeAutoFullIntervals(parsed);
         currentConfig = parsed;
         fileHandle = handle || null;
         hasOpenedFile = true;
@@ -869,11 +887,11 @@
         if (!Number.isInteger(config.max_backups) || config.max_backups < 1) {
           errors.push("max_backups는 1 이상의 정수여야 합니다.");
         }
+        if (!Number.isInteger(config.max_log_file_size_mb) || config.max_log_file_size_mb < 1) {
+          errors.push("max_log_file_size_mb는 1 이상의 정수여야 합니다.");
+        }
         if (!(config.backup_mode === "delta" || config.backup_mode === "copy")) {
           errors.push("backup_mode는 'delta' 또는 'copy'여야 합니다.");
-        }
-        if (!Number.isInteger(config.full_backup_interval) || config.full_backup_interval < 1) {
-          errors.push("full_backup_interval은 1 이상의 정수여야 합니다.");
         }
         if (!hasValidCronFields(config.cron_schedule)) {
           errors.push("cron_schedule은 최소 6필드(초 분 시 일 월 요일)여야 합니다.");
@@ -914,12 +932,6 @@
               !(src.backup_mode === "delta" || src.backup_mode === "copy")
             ) {
               errors.push(`${label}.backup_mode는 'delta' 또는 'copy'여야 합니다.`);
-            }
-            if (
-              src.full_backup_interval != null &&
-              (!Number.isInteger(src.full_backup_interval) || src.full_backup_interval < 1)
-            ) {
-              errors.push(`${label}.full_backup_interval은 1 이상의 정수여야 합니다.`);
             }
             if (src.cron_schedule != null && !hasValidCronFields(src.cron_schedule)) {
               errors.push(`${label}.cron_schedule은 최소 6필드여야 합니다.`);
@@ -1032,8 +1044,8 @@
         document.getElementById("g-enable-periodic").checked = c.enable_periodic !== false;
         document.getElementById("g-enable-event").checked = c.enable_event_driven !== false;
         document.getElementById("g-max-backups").value = c.max_backups || 10;
+        document.getElementById("g-max-log-size").value = c.max_log_file_size_mb || 20;
         document.getElementById("g-backup-mode").value = c.backup_mode || "delta";
-        document.getElementById("g-full-interval").value = c.full_backup_interval || 10;
         document.getElementById("g-cron").value = c.cron_schedule || "0 0 * * * *";
         document.getElementById("g-min-interval").checked = c.enable_min_interval_by_size !== false;
         document.getElementById("g-exclude").value = (c.exclude_patterns || []).join(", ");
@@ -1124,13 +1136,6 @@
             <button class="btn-sm" onclick="resetOverride(${idx}, 'backup_mode', this)">reset</button>
           </div>
           <div class="override-row">
-            <label>full_backup_interval</label>
-            <input type="number" min="1" value="${src.full_backup_interval != null ? src.full_backup_interval : ""}"
-              placeholder="글로벌 설정 사용"
-              onchange="updateSourceOverride(${idx}, 'full_backup_interval', this.value)">
-            <button class="btn-sm" onclick="resetOverride(${idx}, 'full_backup_interval', this)">reset</button>
-          </div>
-          <div class="override-row">
             <label>cron_schedule</label>
             <input type="text" value="${src.cron_schedule || ""}"
               placeholder="글로벌 설정 사용"
@@ -1170,7 +1175,6 @@
           src.exclude_patterns != null ||
           src.max_backups != null ||
           src.backup_mode != null ||
-          src.full_backup_interval != null ||
           src.cron_schedule != null ||
           src.enable_event_driven != null ||
           src.enable_periodic != null
@@ -1428,8 +1432,10 @@
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s);
-        } else if (key === "max_backups" || key === "full_backup_interval") {
+        } else if (key === "max_backups") {
           src[key] = parseInt(value, 10);
+          renderSources();
+          return;
         } else if (key === "enable_event_driven" || key === "enable_periodic") {
           src[key] = value === "true";
         } else {
@@ -1449,8 +1455,8 @@
         currentConfig.enable_periodic = document.getElementById("g-enable-periodic").checked;
         currentConfig.enable_event_driven = document.getElementById("g-enable-event").checked;
         currentConfig.max_backups = parseInt(document.getElementById("g-max-backups").value, 10) || 10;
+        currentConfig.max_log_file_size_mb = parseInt(document.getElementById("g-max-log-size").value, 10) || 20;
         currentConfig.backup_mode = document.getElementById("g-backup-mode").value;
-        currentConfig.full_backup_interval = parseInt(document.getElementById("g-full-interval").value, 10) || 10;
         currentConfig.cron_schedule = document.getElementById("g-cron").value;
         currentConfig.enable_min_interval_by_size = document.getElementById("g-min-interval").checked;
 
@@ -1461,6 +1467,7 @@
           .filter((s) => s);
 
         if (!currentConfig.metadata) currentConfig.metadata = {};
+        normalizeAutoFullIntervals(currentConfig);
 
         return currentConfig;
       }
@@ -1471,12 +1478,7 @@
 
         // Global
         if (config.max_backups < 1) errors.push("글로벌 max_backups는 1 이상이어야 합니다.");
-        if (config.full_backup_interval < 1) errors.push("글로벌 full_backup_interval은 1 이상이어야 합니다.");
-        if (config.backup_mode === "delta" && config.max_backups < config.full_backup_interval) {
-          errors.push(
-            `글로벌: delta 모드에서 max_backups(${config.max_backups})는 full_backup_interval(${config.full_backup_interval}) 이상이어야 합니다. 복원에는 full + 이후 모든 inc가 필요합니다.`
-          );
-        }
+        if (config.max_log_file_size_mb < 1) errors.push("글로벌 max_log_file_size_mb는 1 이상이어야 합니다.");
         if (!config.cron_schedule || config.cron_schedule.trim().split(/\s+/).length < 6) {
           errors.push("글로벌 cron_schedule이 유효하지 않습니다. (최소 6필드: 초 분 시 일 월 요일)");
         }
@@ -1517,22 +1519,8 @@
           if (src.max_backups != null && src.max_backups < 1) {
             errors.push(`${label}: max_backups는 1 이상이어야 합니다.`);
           }
-          if (src.full_backup_interval != null && src.full_backup_interval < 1) {
-            errors.push(`${label}: full_backup_interval은 1 이상이어야 합니다.`);
-          }
           if (src.cron_schedule && src.cron_schedule.trim().split(/\s+/).length < 6) {
             errors.push(`${label}: cron_schedule이 유효하지 않습니다.`);
-          }
-          // Delta mode: max_backups >= full_backup_interval
-          const effMode = src.backup_mode || config.backup_mode;
-          if (effMode === "delta") {
-            const effMax = src.max_backups != null ? src.max_backups : config.max_backups;
-            const effFbi = src.full_backup_interval != null ? src.full_backup_interval : config.full_backup_interval;
-            if (effMax < effFbi) {
-              errors.push(
-                `${label}: delta 모드에서 max_backups(${effMax})는 full_backup_interval(${effFbi}) 이상이어야 합니다.`
-              );
-            }
           }
         }
 
@@ -1589,8 +1577,8 @@
           "g-enable-periodic",
           "g-enable-event",
           "g-max-backups",
+          "g-max-log-size",
           "g-backup-mode",
-          "g-full-interval",
           "g-cron",
           "g-min-interval",
           "g-exclude"
@@ -1602,6 +1590,16 @@
           el.addEventListener("input", syncPreviewIfVisible);
           el.addEventListener("change", syncPreviewIfVisible);
         });
+
+        const maxBackupsInput = document.getElementById("g-max-backups");
+        if (maxBackupsInput) {
+          const onMaxBackupsChanged = () => {
+            renderSources();
+            syncPreviewIfVisible();
+          };
+          maxBackupsInput.addEventListener("input", onMaxBackupsChanged);
+          maxBackupsInput.addEventListener("change", onMaxBackupsChanged);
+        }
       }
 
       async function copyPreviewJson() {
