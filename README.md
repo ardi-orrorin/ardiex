@@ -14,8 +14,9 @@
 - **두 가지 백업 모드**:
   - **delta**: 블록 단위 diff 백업 (주기적 + 실시간 지원)
   - **copy**: 변경 파일 전체 복사 (주기적 백업만 지원)
-- **주기적 full 강제**: 설정된 inc 횟수마다 자동 full 백업
+- **주기적 full 강제**: `max_backups` 기반 자동 주기(`max_backups - 1`, 최소 1) 도달 시 full 백업
 - **Delta 체인 검증**: 백업 시작 시 기존 delta 파일 무결성 검증, 손상 시 full 전환
+- **메타데이터 이력 검증**: 백업 시작 시 `metadata.json`의 `backup_history`와 실제 백업 디렉토리 전체 일치 여부 검증
 - **글로벌/소스별 설정**: 소스별 설정이 글로벌 설정을 오버라이드
 - **시작 시 검증**: 프로그램 시작 시 설정 파일 전체 유효성 검사
 - **`run` 핫리로드**: 실행 중 `settings.json` 변경 감지 후 런타임 작업(스케줄러/워처) 재구성
@@ -101,7 +102,6 @@ Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
       "exclude_patterns": ["*.cache"],
       "max_backups": 5,
       "backup_mode": "copy",
-      "full_backup_interval": 3,
       "cron_schedule": "0 */5 * * * *",
       "enable_event_driven": false,
       "enable_periodic": true
@@ -118,17 +118,32 @@ Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
   "max_backups": 10,
   "max_log_file_size_mb": 20,
   "backup_mode": "delta",
-  "full_backup_interval": 10,
   "cron_schedule": "0 0 * * * *",
   "enable_min_interval_by_size": true,
   "metadata": {
-    "./documents": {
+    "/home/user/documents": {
       "last_full_backup": "2024-02-21T10:00:00Z",
       "last_backup": "2024-02-21T11:30:00Z",
       "file_hashes": {
         "file1.txt": "sha256_hash...",
         "subdir/file2.pdf": "sha256_hash..."
-      }
+      },
+      "backup_history": [
+        {
+          "backup_name": "full_20240221_100000123",
+          "backup_type": "full",
+          "created_at": "2024-02-21T10:00:00Z",
+          "files_backed_up": 120,
+          "bytes_processed": 345678901
+        },
+        {
+          "backup_name": "inc_20240221_110000456",
+          "backup_type": "inc",
+          "created_at": "2024-02-21T11:00:00Z",
+          "files_backed_up": 8,
+          "bytes_processed": 1234567
+        }
+      ]
     }
   }
 }
@@ -139,12 +154,13 @@ Ardiex는 **6필드 cron 표현식** (초 포함)을 사용합니다.
 프로그램 시작(`backup`, `run`) 시 다음 항목을 자동 검증합니다:
 
 - 글로벌 `cron_schedule` 유효성
-- 글로벌 `max_backups > 0`, `full_backup_interval > 0`, `max_log_file_size_mb > 0`
+- 글로벌 `max_backups > 0`, `max_log_file_size_mb > 0`
 - 소스 중복 여부
 - 소스/백업 경로: 절대경로, 존재 여부, 디렉토리 여부
 - 소스 == 백업 동일 경로 금지, 백업 중복 검사
-- 소스별 오버라이드 값 검증 (`max_backups`, `full_backup_interval`, `cron_schedule`)
-- Delta chain 무결성 검증, `full_backup_interval` 도달 시 full 강제
+- 소스별 오버라이드 값 검증 (`max_backups`, `cron_schedule`)
+- 메타데이터 이력(`backup_history`)과 실제 백업 디렉토리 전체 일치 여부 검증
+- Delta chain 무결성 검증, 자동 계산된 full 주기 도달 시 full 강제
 
 ### 백업 경로 규칙
 
@@ -239,14 +255,13 @@ cargo build --release
 ./ardiex config set max_backups 20
 ./ardiex config set max_log_file_size_mb 50  # 로그 파일 50MB마다 회전
 ./ardiex config set backup_mode delta          # delta 또는 copy
-./ardiex config set full_backup_interval 10    # N번 inc 후 full 강제
 ./ardiex config set cron_schedule "0 */30 * * * *"  # 30분마다 (초 분 시 일 월 요일)
 ./ardiex config set enable_min_interval_by_size false  # 용량 기반 최소 주기 비활성화
+# full_backup_interval은 max_backups로 자동 계산되며 수동 설정할 수 없음
 
 # 소스별 설정 (글로벌 오버라이드)
 ./ardiex config set-source /home/user/documents backup_mode copy
 ./ardiex config set-source /home/user/documents max_backups 5
-./ardiex config set-source /home/user/documents full_backup_interval 3
 ./ardiex config set-source /home/user/documents exclude_patterns "*.cache,*.tmp"
 ./ardiex config set-source /home/user/documents cron_schedule "0 */5 * * * *"  # 5분마다
 
@@ -264,12 +279,11 @@ cargo build --release
 | `exclude_patterns`     | `["*.tmp", ...]` | 지정 시 오버라이드 |
 | `max_backups`          | `10`             | 지정 시 오버라이드 |
 | `backup_mode`          | `"delta"`        | 지정 시 오버라이드 |
-| `full_backup_interval` | `10`             | 지정 시 오버라이드 |
 | `cron_schedule`        | `"0 0 * * * *"`  | 지정 시 오버라이드 |
 | `enable_event_driven`  | `true`           | 지정 시 오버라이드 |
 | `enable_periodic`      | `true`           | 지정 시 오버라이드 |
 
-> **제약**: delta 모드에서는 `max_backups >= full_backup_interval`이어야 합니다. 복원에는 full + 이후 모든 inc가 필요하기 때문입니다. 글로벌/소스별 설정 변경 시 자동으로 교차 검증됩니다.
+> `full_backup_interval`은 사용자 입력값이 아니라 `max_backups`로부터 자동 계산되는 내부 값입니다. `settings.json`과 설정 에디터에는 저장/노출되지 않습니다.
 
 ### 6. 백업 관리
 
@@ -306,7 +320,7 @@ cargo build --release
 1. **파일 해시 계산**: SHA-256으로 각 파일의 해시 계산
 2. **변경 감지**: 이전 해시와 비교하여 변경된 파일 식별
 3. **Delta 체인 검증**: 기존 delta 파일 무결성 확인, 손상 시 full 전환
-4. **Full 강제 확인**: `full_backup_interval` 도달 시 full 백업 강제
+4. **Full 강제 확인**: 자동 계산된 full 주기 도달 시 full 백업 강제
 5. **Delta 백업**: 이전 백업 파일이 있으면 4KB 블록 단위 비교 후 `.delta` 파일 저장
 6. **Fallback 복사**: 이전 파일이 없으면 변경 파일 전체 복사
 7. **메타데이터 업데이트**: 파일 해시 정보 저장
@@ -351,6 +365,7 @@ backup/
 - JSON 미리보기 토글 + "미리보기 JSON 복사" 버튼 제공
 - 폼 값 변경 시 JSON 미리보기 자동 갱신
 - 파일 드롭 관련 안내 문구를 "파일 불러오기"로 통일
+- `full_backup_interval` 입력 UI 제거 (자동 계산/저장 제외)
 
 ## 로그 파일 관리
 
@@ -422,9 +437,12 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
 5. **commands/restore_cmd.rs** - 복구 커맨드 처리
 6. **commands/run_cmd.rs** - 서비스 실행 + 주기/이벤트 트리거 + 핫리로드
 7. **config.rs** - 설정 파일 로드/저장 + 기본값 + 소스/글로벌 병합
-8. **backup.rs** - 증분 백업 로직 + 시작 시 검증 + full/inc 결정
-9. **delta.rs** - 블록 단위 delta 백업/복원
-10. **restore.rs** - 백업 복구 관리
-11. **watcher.rs** - 파일 시스템 감시
-12. **logger.rs** - 파일 로깅(로컬타임, 회전/압축)
-13. **editor/settings-editor.html** - 설정 파일 웹 편집기
+8. **backup/mod.rs** - 백업 오케스트레이션 + full/inc 결정
+9. **backup/file_ops.rs** - 파일 스캔/해시/변경감지/보관 정리
+10. **backup/metadata.rs** - metadata 로드/동기화/이력 검증
+11. **backup/validation.rs** - 시작 시 경로/설정/delta chain 검증
+12. **delta.rs** - 블록 단위 delta 백업/복원
+13. **restore.rs** - 백업 복구 관리
+14. **watcher.rs** - 파일 시스템 감시
+15. **logger.rs** - 파일 로깅(로컬타임, 회전/압축)
+16. **editor/settings-editor.html** - 설정 파일 웹 편집기

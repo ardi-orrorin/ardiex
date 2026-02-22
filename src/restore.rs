@@ -74,7 +74,7 @@ impl RestoreManager {
         let total_backups = backups_to_apply.len();
 
         for (i, backup) in backups_to_apply.iter().enumerate() {
-            let files_restored = Self::apply_backup(backup, target_dir, backup_dir)?;
+            let files_restored = Self::apply_backup(backup, target_dir)?;
             total_files_restored += files_restored;
             let progress = ((i + 1) * 100) / total_backups;
             info!(
@@ -100,8 +100,7 @@ impl RestoreManager {
 
         let latest_full = backups
             .iter()
-            .filter(|b| b.is_full && b.timestamp.as_str() <= cutoff)
-            .last();
+            .rfind(|b| b.is_full && b.timestamp.as_str() <= cutoff);
 
         let full_backup = match latest_full {
             Some(b) => b,
@@ -123,19 +122,19 @@ impl RestoreManager {
         Ok(result)
     }
 
-    fn apply_backup(
-        backup: &BackupEntry,
-        target_dir: &Path,
-        backup_root: &Path,
-    ) -> Result<usize> {
+    fn apply_backup(backup: &BackupEntry, target_dir: &Path) -> Result<usize> {
         // Count total files first for progress tracking
         let total_files = Self::count_files(&backup.path)?;
         let mut files_restored = 0;
         let mut last_progress = 0;
 
         Self::restore_dir_recursive(
-            &backup.path, &backup.path, target_dir, backup_root,
-            &mut files_restored, total_files, &mut last_progress,
+            &backup.path,
+            &backup.path,
+            target_dir,
+            &mut files_restored,
+            total_files,
+            &mut last_progress,
         )?;
 
         Ok(files_restored)
@@ -159,7 +158,6 @@ impl RestoreManager {
         base_backup_path: &Path,
         current_path: &Path,
         target_dir: &Path,
-        backup_root: &Path,
         files_restored: &mut usize,
         total_files: usize,
         last_progress: &mut usize,
@@ -170,8 +168,12 @@ impl RestoreManager {
 
             if path.is_dir() {
                 Self::restore_dir_recursive(
-                    base_backup_path, &path, target_dir, backup_root,
-                    files_restored, total_files, last_progress,
+                    base_backup_path,
+                    &path,
+                    target_dir,
+                    files_restored,
+                    total_files,
+                    last_progress,
                 )?;
             } else {
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -215,7 +217,10 @@ impl RestoreManager {
                     let progress = (*files_restored * 100) / total_files;
                     if progress / 10 > *last_progress / 10 {
                         *last_progress = progress;
-                        info!("Restore file progress: {}% ({}/{} files)", progress, files_restored, total_files);
+                        info!(
+                            "Restore file progress: {}% ({}/{} files)",
+                            progress, files_restored, total_files
+                        );
                     }
                 }
             }

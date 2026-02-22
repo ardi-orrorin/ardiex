@@ -11,10 +11,10 @@ use anyhow::Result;
 use clap::Parser;
 
 use cli::{Cli, Commands};
-use commands::config_cmd::handle_config;
 use commands::backup_cmd::handle_backup;
-use commands::run_cmd::handle_run;
+use commands::config_cmd::handle_config;
 use commands::restore_cmd::handle_restore;
+use commands::run_cmd::handle_run;
 use config::ConfigManager;
 
 #[tokio::main]
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             20
         }
     };
-    
+
     if let Some(ref log_dir) = log_dir {
         if let Err(e) = logger::init_file_logging_with_size(log_dir, max_log_file_size_mb) {
             eprintln!("Failed to initialize file logging: {}", e);
@@ -50,9 +50,12 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Config { action } => handle_config(action).await?,
         Commands::Backup => handle_backup().await?,
-        Commands::Restore { backup_dir, target_dir, point, list } => {
-            handle_restore(backup_dir, target_dir, point, list).await?
-        }
+        Commands::Restore {
+            backup_dir,
+            target_dir,
+            point,
+            list,
+        } => handle_restore(backup_dir, target_dir, point, list).await?,
         Commands::Run => handle_run().await?,
     }
 

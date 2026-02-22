@@ -24,7 +24,11 @@ ardiex/
 │   │   ├── restore_cmd.rs  # 복구 커맨드 처리
 │   │   └── run_cmd.rs      # 서비스 실행 + 핫리로드
 │   ├── config.rs        # 설정 파일 관리
-│   ├── backup.rs        # 증분 백업 로직 + 시작 시 검증
+│   ├── backup/
+│   │   ├── mod.rs       # 백업 오케스트레이션
+│   │   ├── file_ops.rs  # 파일 스캔/해시/변경감지/보관 정리
+│   │   ├── metadata.rs  # metadata 동기화/이력 검증
+│   │   └── validation.rs # 시작 시 설정/경로/delta chain 검증
 │   ├── delta.rs         # 블록 단위 delta 백업/복원
 │   ├── restore.rs       # 백업 복구 관리
 │   ├── watcher.rs       # 파일 시스템 감시
@@ -54,14 +58,15 @@ ardiex/
 #### 데이터 무결성
 
 - **Delta 체인 검증**: 백업 시작 시 기존 .delta 파일 로드 검증, 손상 시 full 전환
-- **주기적 full 강제**: `full_backup_interval` 횟수마다 자동 full 백업
+- **주기적 full 강제**: `max_backups` 기반 자동 주기(`max_backups - 1`, 최소 1) 도달 시 full 백업
 - **타임스탬프**: ms 단위로 충돌 방지
 
 #### 글로벌/소스별 설정
 
 - 소스별 설정이 존재하면 글로벌 오버라이드
-- 소스별 오버라이드 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- 소스별 오버라이드 대상 필드: `exclude_patterns`, `max_backups`, `backup_mode`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
 - 글로벌 전용 필드: `enable_min_interval_by_size`, `max_log_file_size_mb`
+- `full_backup_interval`은 `max_backups`로 자동 계산되는 내부 값(수동 설정/저장 비활성화)
 - `SourceConfig.resolve(&BackupConfig)` → `ResolvedSourceConfig`
 - `config set-source <source> <key> reset`으로 초기화
 
@@ -97,9 +102,9 @@ ardiex/
 
 #### 백업 실행 작업
 
-- 파일: `src/backup.rs`
+- 파일: `src/backup/mod.rs`, `src/backup/file_ops.rs`, `src/backup/metadata.rs`, `src/backup/validation.rs`
 - 함수: `BackupManager::validate_all_sources()`, `backup_all_sources()`, `backup_source()`, `perform_backup_to_dir()`
-- 시작 시 검증: `validate_all_sources()`로 delta chain + full interval 사전 검증, `force_full_dirs`에 결과 저장
+- 시작 시 검증: `validate_all_sources()`로 metadata 이력 + delta chain + auto full interval 사전 검증, `force_full_dirs`에 결과 저장
 - 해시 계산: SHA-256 사용
 - Delta 백업: `find_latest_backup_file()`로 이전 백업 찾아 블록 비교
 - Full 강제: 시작 시 `count_inc_since_last_full()`, `validate_delta_chain()`으로 판단
@@ -140,7 +145,7 @@ ardiex/
 - 구조: `cli.rs`에서 clap Parser/Subcommand 정의, `commands`에서 실제 처리
 - 명령어: config, backup, restore, run
 - config 하위: init, list, add-source, remove-source, add-backup, remove-backup, set, set-source
-- set: 글로벌 설정 (backup_mode, full_backup_interval, cron_schedule, enable_min_interval_by_size, max_log_file_size_mb 등)
+- set: 글로벌 설정 (backup_mode, cron_schedule, enable_min_interval_by_size, max_log_file_size_mb 등)
 - set-source: 소스별 설정 (cron_schedule 포함, "reset"으로 초기화 가능)
 - cron 스케줄러: 소스별 개별 tokio task로 스케줄링, 용량 기반 최소 주기 적용
 - 경로 검증: `ensure_absolute()`로 모든 경로 입력 절대경로 강제
@@ -204,7 +209,7 @@ RUST_LOG=debug ./ardiex run
 #### 단위 테스트 실행
 
 ```bash
-cargo test --lib
+cargo test
 ```
 
 #### 통합 테스트

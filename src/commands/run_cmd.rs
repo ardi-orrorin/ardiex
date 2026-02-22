@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, sleep};
 
 use crate::backup::BackupManager;
 use crate::config::{self, ConfigManager};
@@ -142,7 +142,8 @@ fn spawn_runtime_handles(
                     return false;
                 }
                 let resolved = s.resolve(config);
-                resolved.enable_event_driven && matches!(resolved.backup_mode, config::BackupMode::Delta)
+                resolved.enable_event_driven
+                    && matches!(resolved.backup_mode, config::BackupMode::Delta)
             })
             .map(|s| s.source_dir.clone())
             .collect();
@@ -196,7 +197,9 @@ pub async fn handle_run() -> Result<()> {
 
     info!(
         "Ardiex backup service started (mode: {:?}, cron: {}, min_interval_by_size: {})",
-        active_config.backup_mode, active_config.cron_schedule, active_config.enable_min_interval_by_size
+        active_config.backup_mode,
+        active_config.cron_schedule,
+        active_config.enable_min_interval_by_size
     );
 
     let mut reload_tick = tokio::time::interval(Duration::from_secs(2));

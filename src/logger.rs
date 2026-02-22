@@ -6,7 +6,7 @@ use file_rotate::suffix::{AppendTimestamp, DateFrom, FileLimit};
 use file_rotate::{ContentLimit, FileRotate};
 use log::LevelFilter;
 use std::fs;
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -31,7 +31,7 @@ impl Write for RotatingLogWriter {
         let mut guard = self
             .inner
             .lock()
-            .map_err(|_| io::Error::new(ErrorKind::Other, "rotating logger mutex poisoned"))?;
+            .map_err(|_| io::Error::other("rotating logger mutex poisoned"))?;
         guard.write(buf)
     }
 
@@ -39,7 +39,7 @@ impl Write for RotatingLogWriter {
         let mut guard = self
             .inner
             .lock()
-            .map_err(|_| io::Error::new(ErrorKind::Other, "rotating logger mutex poisoned"))?;
+            .map_err(|_| io::Error::other("rotating logger mutex poisoned"))?;
         guard.flush()
     }
 }
@@ -70,9 +70,12 @@ pub fn init_file_logging_with_size(log_dir: &PathBuf, max_log_file_size_mb: u64)
     let max_bytes_u64 = size_mb
         .checked_mul(1024 * 1024)
         .ok_or_else(|| anyhow::anyhow!("max_log_file_size_mb is too large: {}", size_mb))?;
-    let max_bytes: usize = max_bytes_u64
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("max_log_file_size_mb is too large for this platform: {}", size_mb))?;
+    let max_bytes: usize = max_bytes_u64.try_into().map_err(|_| {
+        anyhow::anyhow!(
+            "max_log_file_size_mb is too large for this platform: {}",
+            size_mb
+        )
+    })?;
 
     let suffix = AppendTimestamp::with_format(
         DATE_SUFFIX_PATTERN,

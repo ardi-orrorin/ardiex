@@ -46,7 +46,7 @@ fn perform_incremental_backup(source: &Path, backup_dir: &Path, changed_files: V
 
 - 백업 시작 시 기존 inc 디렉토리의 .delta 파일을 모두 로드 검증
 - 손상 감지 시 자동으로 full 백업으로 전환
-- `full_backup_interval` 도달 시에도 full 강제
+- 자동 계산된 `full_backup_interval` 도달 시에도 full 강제
 
 ### 4-3. 진행률 로깅
 
@@ -113,7 +113,8 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - **소스별 설정 필드**: `Option<T>`로 선언, `#[serde(default, skip_serializing_if = "Option::is_none")]`
 - **cron_schedule**: 글로벌 + 소스별 오버라이드, `cron::Schedule::from_str()`로 검증
 - **로그 회전 설정**: 글로벌 `max_log_file_size_mb` (기본 20)
-- **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `full_backup_interval`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- **소스별 설정 오버라이드**: `exclude_patterns`, `max_backups`, `backup_mode`, `cron_schedule`, `enable_event_driven`, `enable_periodic`
+- **자동 계산 필드**: `full_backup_interval`은 `max_backups` 기반으로 내부 계산되며 설정 파일/에디터에 저장되지 않음
 
 ### 9. run 런타임 핫리로드
 
@@ -136,21 +137,22 @@ pub struct ConfigManager {
 impl ConfigManager {
     pub fn load_or_create() -> Result<Self>
     pub fn save(&mut self) -> Result<()>
-    pub fn add_source(&mut self, source: SourceConfig) -> Result<()>
-    pub fn remove_source(&mut self, source_path: &str) -> Result<()>
+    pub fn add_source(&mut self, source_dir: PathBuf, backup_dirs: Vec<PathBuf>) -> Result<()>
+    pub fn remove_source(&mut self, source_dir: &Path) -> Result<()>
 }
 ```
 
 ### 2. 백업 관리자 패턴
 
 ```rust
+// src/backup/mod.rs
 pub struct BackupManager {
     config: BackupConfig,
     force_full_dirs: HashMap<PathBuf, bool>,  // 시작 시 검증 결과
 }
 
 impl BackupManager {
-    pub fn validate_all_sources(&mut self)  // 프로그램 시작 시 delta chain + full interval 검증
+    pub fn validate_all_sources(&mut self)  // 프로그램 시작 시 delta chain + auto full interval 검증
     pub async fn backup_all_sources(&mut self) -> Result<Vec<BackupResult>>
     async fn backup_source(source, backup_dirs, resolved, force_full_dirs) -> Result<Vec<BackupResult>>
     async fn perform_backup_to_dir(source, backup, exclude, max, mode, force_full) -> Result<BackupResult>
@@ -159,6 +161,10 @@ impl BackupManager {
     fn find_latest_backup_file(backup_dir: &Path, relative: &Path) -> Option<PathBuf>
 }
 ```
+
+- `src/backup/file_ops.rs`: 파일 스캔/변경감지/해시/보관 정리
+- `src/backup/metadata.rs`: metadata 로드/동기화/backup_history 검증
+- `src/backup/validation.rs`: 시작 시 설정/경로/delta chain 검증
 
 ### 3. 파일 감시자 패턴
 
@@ -270,7 +276,8 @@ enum ConfigAction {
 // 모든 경로 입력은 절대경로 필수 (ensure_absolute() 검증)
 // 프로그램 시작 시 validate_all_sources()로 전체 설정 검증:
 //   글로벌 값, 경로 절대/존재/디렉토리, 중복, 소스==백업 금지,
-//   소스별 오버라이드 값, cron 표현식, delta chain, full interval
+//   소스별 오버라이드 값, cron 표현식, delta chain, auto full interval
+// full_backup_interval은 수동 설정하지 않고 max_backups 기준 자동 계산
 ```
 
 ### 3. 설정 파일 웹 편집기
