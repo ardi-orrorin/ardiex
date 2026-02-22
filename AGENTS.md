@@ -27,7 +27,7 @@ ardiex/
 │   ├── backup/
 │   │   ├── mod.rs       # 백업 오케스트레이션
 │   │   ├── file_ops.rs  # 파일 스캔/해시/변경감지/보관 정리
-│   │   ├── metadata.rs  # metadata 동기화/이력 검증
+│   │   ├── metadata.rs  # metadata 동기화/이력/inc_checksum 검증
 │   │   └── validation.rs # 시작 시 설정/경로/delta chain 검증
 │   ├── delta.rs         # 블록 단위 delta 백업/복원
 │   ├── restore.rs       # 백업 복구 관리
@@ -52,12 +52,13 @@ ardiex/
 #### 백업 모드
 
 - **delta 모드**: 블록 단위 diff 백업, 주기적 + 실시간 지원
-- **copy 모드**: 변경 파일 전체 복사, 주기적 백업만 지원
+- **copy 모드**: 변경 파일 전체 복사, 주기적 + 실시간 지원
 - 글로벌 설정 + 소스별 오버라이드 가능
 
 #### 데이터 무결성
 
 - **Delta 체인 검증**: 백업 시작 시 기존 .delta 파일 로드 검증, 손상 시 full 전환
+- **Incremental 체크섬 검증**: `inc` 백업마다 `inc_checksum` 기록, 시작 시 디스크와 대조
 - **주기적 full 강제**: `max_backups` 기반 자동 주기(`max_backups - 1`, 최소 1) 도달 시 full 백업
 - **타임스탬프**: ms 단위로 충돌 방지
 
@@ -80,7 +81,7 @@ ardiex/
 #### 트리거 방식
 
 1. **Cron 스케줄링**: crontab 표현식으로 소스별 개별 스케줄링
-2. **이벤트 기반**: notify crate로 파일 변경 감지 시 실행 (delta 모드만)
+2. **이벤트 기반**: notify crate로 파일 변경 감지 시 실행 (delta/copy 모드 모두 지원)
 3. **용량 기반 최소 주기**: ~10MB→1초, ~100MB→1분, ~1GB→1시간, 이후 GB당 1시간
 
 #### run 핫리로드
@@ -104,7 +105,7 @@ ardiex/
 
 - 파일: `src/backup/mod.rs`, `src/backup/file_ops.rs`, `src/backup/metadata.rs`, `src/backup/validation.rs`
 - 함수: `BackupManager::validate_all_sources()`, `backup_all_sources()`, `backup_source()`, `perform_backup_to_dir()`
-- 시작 시 검증: `validate_all_sources()`로 metadata 이력 + delta chain + auto full interval 사전 검증, `force_full_dirs`에 결과 저장
+- 시작 시 검증: `validate_all_sources()`로 metadata 이력/`inc_checksum` + delta chain + auto full interval 사전 검증, `force_full_dirs`에 결과 저장
 - 해시 계산: SHA-256 사용
 - Delta 백업: `find_latest_backup_file()`로 이전 백업 찾아 블록 비교
 - Full 강제: 시작 시 `count_inc_since_last_full()`, `validate_delta_chain()`으로 판단

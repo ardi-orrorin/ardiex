@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{BackupConfig, BackupMode, SourceConfig};
+use crate::config::{BackupConfig, BackupHistoryType, BackupMode, SourceConfig, SourceMetadata};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -161,6 +161,79 @@ async fn copy_mode_creates_incremental_copy_without_delta_file() -> Result<()> {
     assert!(copied_file.exists());
     assert_eq!(fs::read(&copied_file)?, b"copy_v2");
     assert!(!contains_delta_file(&backup_dir)?);
+
+    fs::remove_dir_all(&base)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn validates_incremental_checksum_from_metadata_on_startup() -> Result<()> {
+    let base = unique_temp_dir("ardiex_inc_checksum_test");
+    let source_dir = base.join("source");
+    let backup_dir = base.join("backup");
+    fs::create_dir_all(&source_dir)?;
+    fs::create_dir_all(&backup_dir)?;
+
+    let file_path = source_dir.join("sample.txt");
+    fs::write(&file_path, b"checksum_v1")?;
+
+    let source = SourceConfig {
+        source_dir: source_dir.clone(),
+        backup_dirs: vec![backup_dir.clone()],
+        enabled: true,
+        exclude_patterns: None,
+        max_backups: None,
+        backup_mode: None,
+        cron_schedule: None,
+        enable_event_driven: None,
+        enable_periodic: None,
+    };
+
+    let config = BackupConfig {
+        sources: vec![source],
+        enable_periodic: true,
+        enable_event_driven: false,
+        exclude_patterns: vec![],
+        max_backups: 10,
+        backup_mode: BackupMode::Copy,
+        cron_schedule: "0 0 * * * *".to_string(),
+        enable_min_interval_by_size: true,
+        max_log_file_size_mb: 20,
+        metadata: HashMap::new(),
+    };
+
+    let mut manager = BackupManager::new(config.clone());
+    manager.validate_all_sources()?;
+    manager.backup_all_sources().await?;
+
+    std::thread::sleep(Duration::from_millis(5));
+    fs::write(&file_path, b"checksum_v2")?;
+    manager.backup_all_sources().await?;
+
+    let metadata_path = backup_dir.join("metadata.json");
+    let metadata_content = fs::read_to_string(&metadata_path)?;
+    let metadata: SourceMetadata = serde_json::from_str(&metadata_content)?;
+    let inc_entry = metadata
+        .backup_history
+        .iter()
+        .find(|entry| matches!(entry.backup_type, BackupHistoryType::Incremental))
+        .ok_or_else(|| anyhow::anyhow!("incremental backup history entry not found"))?;
+    assert!(inc_entry.inc_checksum.is_some());
+
+    let inc_dir_name = metadata
+        .backup_history
+        .iter()
+        .find(|entry| matches!(entry.backup_type, BackupHistoryType::Incremental))
+        .map(|entry| entry.backup_name.clone())
+        .ok_or_else(|| anyhow::anyhow!("incremental backup directory name not found"))?;
+    let inc_file = backup_dir.join(inc_dir_name).join("sample.txt");
+    fs::write(&inc_file, b"tampered_incremental_backup")?;
+
+    let mut restarted_manager = BackupManager::new(config);
+    restarted_manager.validate_all_sources()?;
+    let result = restarted_manager.backup_all_sources().await?;
+    assert_eq!(result.len(), 1);
+    assert!(matches!(result[0].backup_type, BackupType::Full));
 
     fs::remove_dir_all(&base)?;
     Ok(())

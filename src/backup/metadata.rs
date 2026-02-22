@@ -2,6 +2,7 @@ use super::*;
 use crate::config::{BackupHistoryEntry, BackupHistoryType, SourceMetadata};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use log::warn;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -80,6 +81,39 @@ impl BackupManager {
         Ok((files, bytes))
     }
 
+    fn calculate_incremental_backup_checksum(backup_path: &Path) -> Result<String> {
+        let mut files = Vec::new();
+        for entry in WalkDir::new(backup_path).into_iter() {
+            let entry = entry?;
+            if entry.file_type().is_file() {
+                files.push(entry.path().to_path_buf());
+            }
+        }
+
+        files.sort_by(|a, b| {
+            let rel_a = a.strip_prefix(backup_path).unwrap_or(a);
+            let rel_b = b.strip_prefix(backup_path).unwrap_or(b);
+            rel_a.cmp(rel_b)
+        });
+
+        let mut hasher = Sha256::new();
+        for file_path in files {
+            let relative_path = file_path
+                .strip_prefix(backup_path)
+                .unwrap_or(file_path.as_path());
+            let file_hash = Self::calculate_file_hash(&file_path)?;
+            let file_size = fs::metadata(&file_path)?.len();
+
+            hasher.update(relative_path.to_string_lossy().as_bytes());
+            hasher.update([0]);
+            hasher.update(file_hash.as_bytes());
+            hasher.update([0]);
+            hasher.update(file_size.to_le_bytes());
+        }
+
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
     fn scan_backup_entries_from_disk(backup_dir: &Path) -> Result<Vec<BackupDirEntry>> {
         if !backup_dir.exists() {
             return Ok(Vec::new());
@@ -125,6 +159,13 @@ impl BackupManager {
         for entry in entries {
             let (files_backed_up, bytes_processed) =
                 Self::collect_backup_dir_stats(&entry.backup_path)?;
+            let inc_checksum = if matches!(&entry.backup_type, BackupHistoryType::Incremental) {
+                Some(Self::calculate_incremental_backup_checksum(
+                    &entry.backup_path,
+                )?)
+            } else {
+                None
+            };
 
             history.push(BackupHistoryEntry {
                 backup_name: entry.backup_name.clone(),
@@ -132,6 +173,7 @@ impl BackupManager {
                 created_at: entry.created_at,
                 files_backed_up,
                 bytes_processed,
+                inc_checksum,
             });
         }
 
@@ -171,10 +213,16 @@ impl BackupManager {
         created_at: DateTime<Utc>,
         files_backed_up: usize,
         bytes_processed: u64,
-    ) {
+        backup_path: &Path,
+    ) -> Result<()> {
         let backup_type = match backup_type {
             BackupType::Full => BackupHistoryType::Full,
             BackupType::Incremental => BackupHistoryType::Incremental,
+        };
+        let inc_checksum = if matches!(&backup_type, BackupHistoryType::Incremental) {
+            Some(Self::calculate_incremental_backup_checksum(backup_path)?)
+        } else {
+            None
         };
 
         metadata
@@ -186,9 +234,11 @@ impl BackupManager {
             created_at,
             files_backed_up,
             bytes_processed,
+            inc_checksum,
         });
 
         Self::refresh_metadata_markers(metadata);
+        Ok(())
     }
 
     pub(crate) fn validate_backup_metadata_history(backup_dir: &Path) -> Result<()> {
@@ -260,6 +310,14 @@ impl BackupManager {
                     index,
                     meta.bytes_processed,
                     disk.bytes_processed
+                ));
+            }
+            if meta.inc_checksum.as_deref() != disk.inc_checksum.as_deref() {
+                return Err(anyhow::anyhow!(
+                    "metadata history mismatch at index {}: inc_checksum metadata={:?}, disk={:?}",
+                    index,
+                    meta.inc_checksum.as_deref(),
+                    disk.inc_checksum.as_deref()
                 ));
             }
         }

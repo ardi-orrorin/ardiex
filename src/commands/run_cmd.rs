@@ -54,6 +54,26 @@ fn print_config_snapshot(config: &config::BackupConfig, phase: &str) {
     println!("[CONFIG] {}", pretty);
 }
 
+fn collect_event_watch_paths(config: &config::BackupConfig) -> Vec<PathBuf> {
+    if !config.enable_event_driven {
+        return Vec::new();
+    }
+
+    config
+        .sources
+        .iter()
+        .filter(|s| s.enabled)
+        .filter_map(|s| {
+            let resolved = s.resolve(config);
+            if resolved.enable_event_driven {
+                Some(s.source_dir.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn spawn_runtime_handles(
     config: &config::BackupConfig,
     backup_tx: mpsc::Sender<()>,
@@ -133,47 +153,28 @@ fn spawn_runtime_handles(
         }
     }
 
-    let watcher_task = if config.enable_event_driven {
-        let watch_paths: Vec<PathBuf> = config
-            .sources
-            .iter()
-            .filter(|s| {
-                if !s.enabled {
-                    return false;
-                }
-                let resolved = s.resolve(config);
-                resolved.enable_event_driven
-                    && matches!(resolved.backup_mode, config::BackupMode::Delta)
-            })
-            .map(|s| s.source_dir.clone())
-            .collect();
-
-        if watch_paths.is_empty() {
+    let watch_paths = collect_event_watch_paths(config);
+    let watcher_task = if watch_paths.is_empty() {
+        if config.enable_event_driven {
             info!("No eligible sources for event-driven watcher");
-            None
-        } else {
-            Some(tokio::task::spawn_blocking(move || {
-                match FileWatcher::new(watch_paths, backup_tx.clone(), Duration::from_millis(300)) {
-                    Ok(_watcher) => {
-                        info!("File watcher started");
-                        // Keep _watcher alive — dropping it stops file watching
-                        loop {
-                            std::thread::sleep(Duration::from_secs(1));
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to start file watcher: {}", e);
+        }
+        None
+    } else {
+        Some(tokio::task::spawn_blocking(move || {
+            match FileWatcher::new(watch_paths, backup_tx.clone(), Duration::from_millis(300)) {
+                Ok(_watcher) => {
+                    info!("File watcher started");
+                    // Keep _watcher alive — dropping it stops file watching
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
                     }
                 }
-            }))
-        }
-    } else {
-        None
+                Err(e) => {
+                    error!("Failed to start file watcher: {}", e);
+                }
+            }
+        }))
     };
-
-    if matches!(config.backup_mode, config::BackupMode::Copy) {
-        info!("Running in copy mode - event-driven backup is disabled, periodic backup only");
-    }
 
     Ok(RuntimeHandles {
         cron_tasks,
@@ -302,4 +303,63 @@ pub async fn handle_run() -> Result<()> {
     runtime_handles.abort_all();
     info!("Ardiex backup service stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_event_watch_paths;
+    use crate::config::{BackupConfig, BackupMode, SourceConfig};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn make_source(path: &str) -> SourceConfig {
+        SourceConfig {
+            source_dir: PathBuf::from(path),
+            backup_dirs: vec![PathBuf::from("/tmp/backup")],
+            enabled: true,
+            exclude_patterns: None,
+            max_backups: None,
+            backup_mode: None,
+            cron_schedule: None,
+            enable_event_driven: None,
+            enable_periodic: None,
+        }
+    }
+
+    fn base_config(backup_mode: BackupMode, enable_event_driven: bool) -> BackupConfig {
+        BackupConfig {
+            sources: vec![make_source("/tmp/source")],
+            enable_periodic: true,
+            enable_event_driven,
+            exclude_patterns: vec![],
+            max_backups: 10,
+            backup_mode,
+            cron_schedule: "0 0 * * * *".to_string(),
+            enable_min_interval_by_size: false,
+            max_log_file_size_mb: 20,
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn collect_event_watch_paths_includes_copy_mode_source() {
+        let config = base_config(BackupMode::Copy, true);
+        let paths = collect_event_watch_paths(&config);
+        assert_eq!(paths, vec![PathBuf::from("/tmp/source")]);
+    }
+
+    #[test]
+    fn collect_event_watch_paths_respects_source_override_disable() {
+        let mut config = base_config(BackupMode::Delta, true);
+        config.sources[0].enable_event_driven = Some(false);
+        let paths = collect_event_watch_paths(&config);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn collect_event_watch_paths_empty_when_global_disabled() {
+        let config = base_config(BackupMode::Copy, false);
+        let paths = collect_event_watch_paths(&config);
+        assert!(paths.is_empty());
+    }
 }
