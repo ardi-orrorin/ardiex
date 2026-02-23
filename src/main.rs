@@ -9,6 +9,7 @@ mod watcher;
 
 use anyhow::Result;
 use clap::Parser;
+use mimalloc::MiMalloc;
 
 use cli::{Cli, Commands};
 use commands::backup_cmd::handle_backup;
@@ -16,6 +17,9 @@ use commands::config_cmd::handle_config;
 use commands::restore_cmd::handle_restore;
 use commands::run_cmd::handle_run;
 use config::ConfigManager;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
