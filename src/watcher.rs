@@ -117,3 +117,7 @@ impl FileWatcher {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/watcher_tests.rs"]
+mod tests;

@@ -284,3 +284,7 @@ fn get_config_path() -> Result<PathBuf> {
     exe_path.push("settings.json");
     Ok(exe_path)
 }
+
+#[cfg(test)]
+#[path = "tests/config_tests.rs"]
+mod tests;

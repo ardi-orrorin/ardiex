@@ -377,6 +377,9 @@ backup/
 - 회전 기준: 글로벌 설정 `max_log_file_size_mb` (기본 20MB)
 - 회전 시 파일명 suffix: `%Y-%m-%d_%H-%M-%S`
 - 회전된 로그는 gzip으로 자동 압축, 최대 30개 보관
+- 로그는 파일 저장과 콘솔 출력이 동시에 수행됨
+- 상세 테스트 케이스: `docs/test-cases/logging-tee.md`
+- TDD 테스트 케이스 계획: `docs/test-cases/tdd-test-plan.md`
 
 ## 기술 스택
 
@@ -449,3 +452,19 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
 14. **watcher.rs** - 파일 시스템 감시
 15. **logger.rs** - 파일 로깅(로컬타임, 회전/압축)
 16. **editor/settings-editor.html** - 설정 파일 웹 편집기
+17. **tests/** - 테스트 코드 통합 폴더 (`backup/run_cmd/logger/config/delta/restore/watcher` 테스트)
+
+## 테스트 코드 구조
+
+- 단위/모듈 테스트 코드는 `src/tests`에 통합 관리
+- 각 실제 모듈(`backup/mod.rs`, `commands/run_cmd.rs`, `logger.rs`, `config.rs`, `delta.rs`, `restore.rs`, `watcher.rs`)에서 `#[path = "..."]`로 테스트 파일 연결
+- 기능 추가/코드 수정 시 관련 테스트 코드를 반드시 수정 또는 추가하고, 변경 후 테스트 실행으로 검증해야 함
+- 테스트 추가 우선순위: 성공 경로보다 실패 경로(잘못된 설정/입력/파일 손상/경로 오류/핫리로드 거부)를 먼저 커버
+- 현재 테스트 파일:
+  - `src/tests/backup_tests.rs`
+  - `src/tests/run_cmd_tests.rs`
+  - `src/tests/logger_tests.rs`
+  - `src/tests/config_tests.rs`
+  - `src/tests/delta_tests.rs`
+  - `src/tests/restore_tests.rs`
+  - `src/tests/watcher_tests.rs`

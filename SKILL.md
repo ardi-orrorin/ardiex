@@ -307,17 +307,29 @@ enum ConfigAction {
 
 ## 테스트 전략
 
+- 테스트 코드 위치: `src/tests/*.rs` (모듈에서 `#[path = "..."]`로 연결)
+- TDD 케이스 기준 문서: `docs/test-cases/tdd-test-plan.md`
+- 기능 추가/코드 수정 시 관련 테스트 코드를 반드시 수정 또는 추가하고, 테스트 실행으로 검증
+- 테스트 작성 우선순위: 실패 경로(설정 오류/입력 오류/데이터 손상/경로 오류) -> 정상 경로
+
 ### 1. 단위 테스트
 
 - 해시 계산 함수
 - 설정 직렬화/역직렬화
 - 파일 패턴 매칭
+- 런타임/워처 경로 테스트: `src/tests/run_cmd_tests.rs`
+- 로그 tee writer 테스트: `src/tests/logger_tests.rs`
+- 설정/해상도 테스트: `src/tests/config_tests.rs`
+- delta 알고리즘 테스트: `src/tests/delta_tests.rs`
+- watcher 이벤트 필터/디바운스 테스트: `src/tests/watcher_tests.rs`
 
 ### 2. 통합 테스트
 
 - 전체 백업 흐름
 - CLI 명령어 실행
 - 설정 파일 조작
+- 백업 시나리오 테스트: `src/tests/backup_tests.rs`
+- 복구 시나리오 테스트: `src/tests/restore_tests.rs`
 
 ### 3. 테스트 유틸리티
 

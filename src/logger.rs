@@ -14,33 +14,48 @@ const DEFAULT_MAX_LOG_FILE_SIZE_MB: u64 = 20;
 const MAX_ROTATED_LOG_FILES: usize = 30;
 const DATE_SUFFIX_PATTERN: &str = "%Y-%m-%d_%H-%M-%S";
 
-struct RotatingLogWriter {
-    inner: Mutex<FileRotate<AppendTimestamp>>,
+struct TeeLogWriter<F: Write, O: Write> {
+    file_writer: Mutex<F>,
+    stdout: Mutex<O>,
 }
 
-impl RotatingLogWriter {
-    fn new(inner: FileRotate<AppendTimestamp>) -> Self {
+impl<F: Write, O: Write> TeeLogWriter<F, O> {
+    fn new(file_writer: F, stdout: O) -> Self {
         Self {
-            inner: Mutex::new(inner),
+            file_writer: Mutex::new(file_writer),
+            stdout: Mutex::new(stdout),
         }
     }
 }
 
-impl Write for RotatingLogWriter {
+impl<F: Write, O: Write> Write for TeeLogWriter<F, O> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut guard = self
-            .inner
+        let mut file_writer = self
+            .file_writer
             .lock()
-            .map_err(|_| io::Error::other("rotating logger mutex poisoned"))?;
-        guard.write(buf)
+            .map_err(|_| io::Error::other("file logger mutex poisoned"))?;
+        file_writer.write_all(buf)?;
+
+        let mut stdout = self
+            .stdout
+            .lock()
+            .map_err(|_| io::Error::other("stdout logger mutex poisoned"))?;
+        stdout.write_all(buf)?;
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let mut guard = self
-            .inner
+        let mut file_writer = self
+            .file_writer
             .lock()
-            .map_err(|_| io::Error::other("rotating logger mutex poisoned"))?;
-        guard.flush()
+            .map_err(|_| io::Error::other("file logger mutex poisoned"))?;
+        file_writer.flush()?;
+
+        let mut stdout = self
+            .stdout
+            .lock()
+            .map_err(|_| io::Error::other("stdout logger mutex poisoned"))?;
+        stdout.flush()
     }
 }
 
@@ -101,7 +116,7 @@ pub fn init_file_logging_with_size(log_dir: &PathBuf, max_log_file_size_mb: u64)
         Compression::OnRotate(1),
     );
 
-    let writer = RotatingLogWriter::new(rotate);
+    let writer = TeeLogWriter::new(rotate, io::stdout());
 
     let mut builder = Builder::from_env(Env::default().default_filter_or("info"));
     builder
@@ -122,3 +137,7 @@ pub fn init_console_logging() {
     apply_local_time_format(&mut builder);
     builder.init();
 }
+
+#[cfg(test)]
+#[path = "tests/logger_tests.rs"]
+mod tests;

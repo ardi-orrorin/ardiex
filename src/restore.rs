@@ -240,3 +240,7 @@ impl RestoreManager {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/restore_tests.rs"]
+mod tests;

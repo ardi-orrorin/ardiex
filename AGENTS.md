@@ -33,6 +33,14 @@ ardiex/
 │   ├── restore.rs       # 백업 복구 관리
 │   ├── watcher.rs       # 파일 시스템 감시
 │   ├── logger.rs        # 파일 로깅(로컬타임, 회전/압축)
+│   ├── tests/           # 테스트 코드 통합 폴더
+│   │   ├── backup_tests.rs    # 백업 시나리오 테스트
+│   │   ├── run_cmd_tests.rs   # run 핫리로드/워처 경로 테스트
+│   │   ├── logger_tests.rs    # 로그 tee writer 테스트
+│   │   ├── config_tests.rs    # 설정 병합/기본값/자동 주기 계산 테스트
+│   │   ├── delta_tests.rs     # delta 생성/적용/저장/로드 테스트
+│   │   ├── restore_tests.rs   # restore 선택/적용/cutoff 테스트
+│   │   └── watcher_tests.rs   # watcher 이벤트 필터/디바운스 테스트
 │   └── editor/
 │       └── settings-editor.html  # 설정 파일 웹 편집기
 ├── settings.json        # 실행 시 생성되는 설정 파일
@@ -213,11 +221,17 @@ RUST_LOG=debug ./ardiex run
 cargo test
 ```
 
+- 테스트 코드는 `src/tests/*.rs`에 통합되어 있으며 각 모듈에서 `#[path]`로 로딩됩니다.
+- 기능 추가/코드 수정 시 관련 테스트 코드를 반드시 수정 또는 추가하고, 테스트 실행으로 검증해야 합니다.
+- 테스트는 실패 경로를 우선으로 작성합니다(설정값 오류, 경로 오류, 데이터 손상, 파싱 실패, 핫리로드 거부 등).
+
 #### 통합 테스트
 
 ```bash
 cargo test --test integration
 ```
+
+- TDD 상세 케이스 문서: `docs/test-cases/tdd-test-plan.md`
 
 #### 수동 백업 테스트
 

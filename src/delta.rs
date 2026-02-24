@@ -174,3 +174,7 @@ pub fn load_delta(delta_path: &Path) -> Result<DeltaFile> {
 pub fn delta_size(delta: &DeltaFile) -> usize {
     delta.changed_blocks.iter().map(|b| b.data.len()).sum()
 }
+
+#[cfg(test)]
+#[path = "tests/delta_tests.rs"]
+mod tests;

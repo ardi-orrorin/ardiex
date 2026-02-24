@@ -13,6 +13,7 @@ mod metadata;
 mod validation;
 
 #[cfg(test)]
+#[path = "../tests/backup_tests.rs"]
 mod tests;
 
 #[derive(Debug)]
@@ -130,8 +131,15 @@ impl BackupManager {
         let mut metadata = Self::load_source_metadata(&metadata_path);
         Self::synchronize_metadata_history_with_disk(backup_dir, &mut metadata)?;
 
-        let (mut backup_type, mut files_to_backup) =
+        let (mut backup_type, mut files_to_backup, current_hashes) =
             Self::scan_for_changes(source_dir, &metadata, exclude_patterns)?;
+
+        // Remove hashes for files that no longer exist in source.
+        let before_hashes = metadata.file_hashes.len();
+        metadata
+            .file_hashes
+            .retain(|path, _| current_hashes.contains_key(path));
+        let stale_removed = metadata.file_hashes.len() != before_hashes;
 
         // Apply force_full flag from startup validation
         if force_full && matches!(backup_type, BackupType::Incremental) {
@@ -148,6 +156,14 @@ impl BackupManager {
                 "[{:?}] No changes detected, skipping incremental backup",
                 backup_dir
             );
+            if stale_removed {
+                let metadata_content = serde_json::to_string_pretty(&metadata)?;
+                fs::write(&metadata_path, metadata_content)?;
+                info!(
+                    "[{:?}] Updated metadata after detecting deleted files",
+                    backup_dir
+                );
+            }
             return Ok(BackupResult {
                 backup_dir: backup_dir.to_path_buf(),
                 backup_type,
@@ -247,10 +263,12 @@ impl BackupManager {
                 }
             }
 
-            let hash = Self::calculate_file_hash(file_path)?;
-            metadata
-                .file_hashes
-                .insert(relative_path.to_string_lossy().to_string(), hash);
+            let rel_key = relative_path.to_string_lossy().to_string();
+            let hash = current_hashes
+                .get(&rel_key)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Missing precomputed hash for {}", rel_key))?;
+            metadata.file_hashes.insert(rel_key, hash);
         }
 
         let now = Utc::now();

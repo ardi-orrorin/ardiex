@@ -12,7 +12,7 @@ impl BackupManager {
         source_dir: &Path,
         metadata: &SourceMetadata,
         exclude_patterns: &[String],
-    ) -> Result<(BackupType, Vec<PathBuf>)> {
+    ) -> Result<(BackupType, Vec<PathBuf>, HashMap<String, String>)> {
         let mut files_to_backup = Vec::new();
         let mut current_hashes = HashMap::new();
 
@@ -38,7 +38,7 @@ impl BackupManager {
         };
 
         if matches!(backup_type, BackupType::Full) {
-            return Ok((backup_type, files_to_backup));
+            return Ok((backup_type, files_to_backup, current_hashes));
         }
 
         let changed_files: Vec<PathBuf> = files_to_backup
@@ -54,7 +54,7 @@ impl BackupManager {
             })
             .collect();
 
-        Ok((backup_type, changed_files))
+        Ok((backup_type, changed_files, current_hashes))
     }
 
     pub(super) fn collect_all_files(
