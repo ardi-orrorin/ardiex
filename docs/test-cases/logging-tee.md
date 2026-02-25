@@ -3,8 +3,9 @@
 ## 범위
 
 - 대상 기능: `src/logger.rs`의 파일+콘솔 동시 출력(`TeeLogWriter`)
-- 검증 명령: `backup`, `run`, `restore`, `config`
+- 검증 명령: `backup`, `run`, `restore`, `config`, `updater`
 - 로그 경로: `<실행파일 경로>/logs/ardiex.log`
+- updater 로그 경로: `<실행파일 경로>/logs/updater.log`
 
 ## 공통 사전조건
 
@@ -115,6 +116,17 @@
 - 기대결과:
 1. 두 채널 모두 종료 로그가 남아 있음
 
+## TC-LOG-011 updater 로그 파일 분리
+
+- 목적: updater 실행 시 백업 로그(`ardiex.log`)와 분리된 로그 파일(`updater.log`)에 기록되는지 확인
+- 절차:
+1. `updater --help` 실행
+2. `logs/updater.log` 생성 여부 확인
+3. `logs/ardiex.log`와 분리 저장되는지 확인
+- 기대결과:
+1. `updater.log`가 생성됨
+2. updater 관련 로그가 `updater.log`에 기록됨
+
 ## 자동화 체크 스크립트 예시
 
 ```bash
@@ -149,3 +161,4 @@ rg -q "Backup completed" "$ENV_DIR/logs/ardiex.log"
 | TC-LOG-008 |  |  |  |  |
 | TC-LOG-009 |  |  |  |  |
 | TC-LOG-010 |  |  |  |  |
+| TC-LOG-011 |  |  |  |  |

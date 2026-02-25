@@ -48,6 +48,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Sync Cargo.toml version with tag (Unix)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os != 'Windows'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          perl -i -pe "s/^version = \".*\"/version = \"$TAG_VERSION\"/" Cargo.toml
+          echo "Cargo.toml version synchronized to $TAG_VERSION"
+
+      - name: Sync Cargo.toml version with tag (Windows)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME.Substring(1)
+          (Get-Content Cargo.toml) -replace '^version = ".*"$', "version = `"$tagVersion`"" | Set-Content Cargo.toml -Encoding utf8
+          Write-Host "Cargo.toml version synchronized to $tagVersion"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -69,18 +84,20 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/ardiex dist/
+          cp target/${{ matrix.target }}/release/updater dist/
           cp src/editor/settings-editor.html dist/
           cd dist
-          tar czf ../${{ matrix.artifact }}.tar.gz ardiex settings-editor.html
+          tar czf ../${{ matrix.artifact }}.tar.gz ardiex updater settings-editor.html
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir dist
           cp target/${{ matrix.target }}/release/ardiex.exe dist/
+          cp target/${{ matrix.target }}/release/updater.exe dist/
           cp src/editor/settings-editor.html dist/
           cd dist
-          Compress-Archive -Path ardiex.exe,settings-editor.html -DestinationPath ../${{ matrix.artifact }}.zip
+          Compress-Archive -Path ardiex.exe,updater.exe,settings-editor.html -DestinationPath ../${{ matrix.artifact }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

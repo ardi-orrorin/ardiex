@@ -1,6 +1,6 @@
 ---
 name: ardiex-assistant
-description: Ardiex 증분 백업 시스템 전문가. 주기적/이벤트 기반 백업, 다중 소스/백업 경로 관리, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, 파일 시스템 감시(notify), Tokio 비동기 처리, Rust 프로젝트 구조에 대한 질문에 답변하고 작업을 수행합니다.
+description: Ardiex 증분 백업 시스템 전문가. 주기적/이벤트 기반 백업, 다중 소스/백업 경로 관리, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, 파일 시스템 감시(notify), Tokio 비동기 처리, GitHub Release 기반 자동 업데이트(updater), Rust 프로젝트 구조에 대한 질문에 답변하고 작업을 수행합니다.
 ---
 
 # Ardiex 프로젝트 - AI 에이전트 가이드
@@ -33,6 +33,9 @@ ardiex/
 │   ├── restore.rs       # 백업 복구 관리
 │   ├── watcher.rs       # 파일 시스템 감시
 │   ├── logger.rs        # 파일 로깅(로컬타임, 회전/압축)
+│   ├── update.rs        # GitHub release 조회/버전 비교/에셋 선택
+│   ├── bin/
+│   │   └── updater.rs   # 단독 업데이트 실행 파일(다운로드/교체/재시작)
 │   ├── tests/           # 테스트 코드 통합 폴더
 │   │   ├── backup_tests.rs    # 백업 시나리오 테스트
 │   │   ├── run_cmd_tests.rs   # run 핫리로드/워처 경로 테스트
@@ -40,7 +43,8 @@ ardiex/
 │   │   ├── config_tests.rs    # 설정 병합/기본값/자동 주기 계산 테스트
 │   │   ├── delta_tests.rs     # delta 생성/적용/저장/로드 테스트
 │   │   ├── restore_tests.rs   # restore 선택/적용/cutoff 테스트
-│   │   └── watcher_tests.rs   # watcher 이벤트 필터/디바운스 테스트
+│   │   ├── watcher_tests.rs   # watcher 이벤트 필터/디바운스 테스트
+│   │   └── update_tests.rs    # 업데이트 버전/에셋 선택 테스트
 │   └── editor/
 │       └── settings-editor.html  # 설정 파일 웹 편집기
 ├── settings.json        # 실행 시 생성되는 설정 파일
@@ -99,6 +103,14 @@ ardiex/
 - 새 설정이 잘못되면 기존 런타임 유지 + `[HOT-RELOAD] Rejected invalid configuration` 로그 남김
 - 시작 시/핫리로드 시 설정 스냅샷을 pretty JSON으로 콘솔/로그 출력 (`[CONFIG]`)
 
+#### 자동 업데이트
+
+- `ardiex` 시작 시 GitHub latest release(`ardi-orrorin/ardiex`) 조회
+- 최신 버전 발견 시 타깃별 에셋(`.tar.gz`/`.zip`)을 찾고 `updater`로 위임
+- `updater`는 부모 종료 대기 후 실행 파일 교체 및 재실행
+- 윈도우는 실행 파일 잠금 특성 때문에 `updater.exe`로 별도 교체 수행
+- `ARDIEX_SKIP_UPDATE_CHECK=1`로 업데이트 재진입 루프 방지
+
 ### 3. 주요 작업별 코드 위치
 
 #### 설정 관리 작업
@@ -137,10 +149,18 @@ ardiex/
 #### 로깅 작업
 
 - 파일: `src/logger.rs`
-- 함수: `init_file_logging_with_size()`, `init_console_logging()`
+- 함수: `init_file_logging_with_size()`, `init_file_logging_with_size_and_name()`, `init_console_logging()`
 - 로그 위치: 실행 파일 경로의 `logs/ardiex.log`
+- updater 로그 위치: 실행 파일 경로의 `logs/updater.log`
 - 로컬타임 포맷: `%Y-%m-%d %H:%M:%S%.3f`
 - 회전 기준: `max_log_file_size_mb`(글로벌 설정), gzip 압축, 날짜 suffix `%Y-%m-%d_%H-%M-%S`
+
+#### 업데이트 작업
+
+- 파일: `src/update.rs`, `src/bin/updater.rs`
+- 함수(`src/update.rs`): `fetch_latest_release()`, `is_newer_version()`, `expected_release_asset_name_for_current_target()`, `find_release_asset_download_url()`
+- 함수(`src/main.rs`): `maybe_delegate_to_updater()`
+- updater 주요 동작: 다운로드 -> 압축해제 -> 실행 파일 교체(재시도) -> 원래 인자로 재실행
 
 #### 파일 감시 작업
 
@@ -160,6 +180,12 @@ ardiex/
 - 경로 검증: `ensure_absolute()`로 모든 경로 입력 절대경로 강제
 - 시작 시 검증: `handle_backup()`, `handle_run()`에서 `validate_all_sources()` 호출
 - `run` 시작 시 현재 설정 스냅샷 출력, 실행 중 설정 변경 핫리로드 처리
+
+#### 릴리즈/배포 작업
+
+- 파일: `.github/workflows/release.yml`
+- 태그 빌드 시 `Cargo.toml` 버전을 태그(`vX.Y.Z`) 기준 `X.Y.Z`로 동기화 후 빌드
+- 패키징 대상: `ardiex` + `updater` + `settings-editor.html`
 
 #### 설정 에디터 작업
 
@@ -218,7 +244,7 @@ RUST_LOG=debug ./ardiex run
 #### 단위 테스트 실행
 
 ```bash
-cargo test
+cargo test --all-targets
 ```
 
 - 테스트 코드는 `src/tests/*.rs`에 통합되어 있으며 각 모듈에서 `#[path]`로 로딩됩니다.
