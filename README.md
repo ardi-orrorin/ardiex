@@ -23,6 +23,7 @@
 - **`run` 핫리로드**: 실행 중 `settings.json` 변경 감지 후 런타임 작업(스케줄러/워처) 재구성
 - **설정 스냅샷 출력**: `run` 시작 시 현재 설정을 pretty JSON으로 콘솔/로그에 출력
 - **로그 회전/압축**: `max_log_file_size_mb` 초과 시 gzip 압축 + 날짜 suffix로 자동 회전
+- **자동 업데이트**: 실행 시 GitHub Release 최신 버전 조회 후 신규 버전이 있으면 `updater` 바이너리로 교체 수행
 
 ### 2. 트리거 방식
 
@@ -373,6 +374,7 @@ backup/
 ## 로그 파일 관리
 
 - 로그 파일: 실행 파일 경로의 `logs/ardiex.log`
+- updater 로그 파일: 실행 파일 경로의 `logs/updater.log`
 - 로그 시간: 로컬 타임(`%Y-%m-%d %H:%M:%S%.3f`)
 - 회전 기준: 글로벌 설정 `max_log_file_size_mb` (기본 20MB)
 - 회전 시 파일명 suffix: `%Y-%m-%d_%H-%M-%S`
@@ -380,6 +382,30 @@ backup/
 - 로그는 파일 저장과 콘솔 출력이 동시에 수행됨
 - 상세 테스트 케이스: `docs/test-cases/logging-tee.md`
 - TDD 테스트 케이스 계획: `docs/test-cases/tdd-test-plan.md`
+
+## 자동 업데이트
+
+- 저장소: `ardi-orrorin/ardiex` GitHub Release 기준
+- 실행 흐름:
+1. `ardiex` 시작 시 latest release 조회
+2. 현재 버전보다 최신 태그가 있으면 현재 타깃(OS/ARCH)에 맞는 에셋 탐색
+3. 같은 경로의 `updater`(윈도우는 `updater.exe`)를 실행하고 `ardiex`는 종료
+4. `updater`가 에셋 다운로드/압축 해제 후 `ardiex` 실행 파일 교체
+5. 원래 인자로 `ardiex` 재실행
+- 루프 방지: `ARDIEX_SKIP_UPDATE_CHECK=1` 환경변수로 재시작 프로세스의 재검사 차단
+- 지원 에셋명:
+  - `ardiex-linux-amd64.tar.gz`
+  - `ardiex-linux-arm64.tar.gz`
+  - `ardiex-macos-amd64.tar.gz`
+  - `ardiex-macos-arm64.tar.gz`
+  - `ardiex-windows-amd64.zip`
+- 윈도우 교체 전략: 부모 프로세스 종료 대기 + 파일 교체 재시도
+
+### 릴리즈 파이프라인 연동
+
+- 워크플로우: `.github/workflows/release.yml`
+- 태그 푸시(`vX.Y.Z`) 시 build 단계 시작 전에 `Cargo.toml`의 `version`을 태그 버전(`X.Y.Z`)으로 동기화
+- 릴리즈 아카이브에 `ardiex`와 `updater`(윈도우는 `ardiex.exe`, `updater.exe`)를 함께 패키징
 
 ## 기술 스택
 
@@ -395,6 +421,8 @@ backup/
 - **로그 파일 회전**: file-rotate
 - **Cron 스케줄링**: cron
 - **디렉토리 탐색**: walkdir
+- **업데이트 통신**: reqwest (blocking + rustls)
+- **업데이트 압축 해제**: tar + zip + flate2
 
 ## 주요 의존성
 
@@ -411,6 +439,11 @@ anyhow = "1.0"
 sha2 = "0.10"
 file-rotate = "0.7"
 walkdir = "2.5"
+mimalloc = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tar = "0.4"
+zip = "2.2"
+flate2 = "1.0"
 ```
 
 ## Release 프로필 최적화
@@ -450,9 +483,11 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
 12. **delta.rs** - 블록 단위 delta 백업/복원
 13. **restore.rs** - 백업 복구 관리
 14. **watcher.rs** - 파일 시스템 감시
-15. **logger.rs** - 파일 로깅(로컬타임, 회전/압축)
-16. **editor/settings-editor.html** - 설정 파일 웹 편집기
-17. **tests/** - 테스트 코드 통합 폴더 (`backup/run_cmd/logger/config/delta/restore/watcher` 테스트)
+15. **logger.rs** - 파일 로깅(로컬타임, 회전/압축, 파일+콘솔 tee)
+16. **update.rs** - GitHub release 조회/버전 비교/타깃 에셋 선택
+17. **bin/updater.rs** - 단독 업데이트 실행 파일(다운로드/교체/재시작)
+18. **editor/settings-editor.html** - 설정 파일 웹 편집기
+19. **tests/** - 테스트 코드 통합 폴더 (`backup/run_cmd/logger/config/delta/restore/watcher/update` 테스트)
 
 ## 테스트 코드 구조
 
@@ -468,3 +503,4 @@ overflow-checks = false  # 오버플로 검사 제거로 성능 향상
   - `src/tests/delta_tests.rs`
   - `src/tests/restore_tests.rs`
   - `src/tests/watcher_tests.rs`
+  - `src/tests/update_tests.rs`

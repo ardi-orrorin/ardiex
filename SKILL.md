@@ -1,6 +1,6 @@
 ---
 name: ardiex
-description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 기반 백업, 다중 소스/백업 경로, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, JSON 설정 파일, 파일 시스템 감시(notify), Tokio 비동기 처리가 필요한 작업에 사용.
+description: Ardiex 증분 백업 시스템 작업 전용. 주기적/이벤트 기반 백업, 다중 소스/백업 경로, SHA-256 증분 백업, 블록 단위 delta 백업, delta/copy 이중 모드, 글로벌/소스별 설정, 주기적 full 강제, delta 체인 검증, 백업 복구, 진행률 로깅, 파일 로깅, CLI 설정 관리, cron 스케줄링, 용량 기반 최소 백업 주기, JSON 설정 파일, 파일 시스템 감시(notify), run 핫리로드, GitHub Release 기반 자동 업데이트(updater) 작업에 사용.
 ---
 
 # Ardiex 백업 프로그램 기술 명세
@@ -99,11 +99,15 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 ### 6. 파일 로깅
 
 - **로그 위치**: 실행 파일 경로의 `logs/ardiex.log`
+- **업데이터 로그 위치**: 실행 파일 경로의 `logs/updater.log`
 - **시간 포맷**: 로컬타임 `%Y-%m-%d %H:%M:%S%.3f`
 - **회전 정책**: `max_log_file_size_mb` 초과 시 회전
 - **회전 파일명**: 날짜 suffix `%Y-%m-%d_%H-%M-%S`
 - **압축**: 회전 시 gzip 압축(`Compression::OnRotate(1)`), 최대 30개 보관
 - **기록 내용**: 백업 시작/완료, 복구, 에러, delta 정보, 핫리로드 상태
+- **로거 API**:
+  - `init_file_logging_with_size()` 기본 로그 파일(`ardiex.log`)
+  - `init_file_logging_with_size_and_name()` 커스텀 로그 파일(`updater.log` 등)
 
 ### 7. SHA-256 해시 계산
 
@@ -131,6 +135,20 @@ pub fn restore_to_point(backup_dir: &Path, target: &Path, point: Option<&str>) -
 - 유효하면 스케줄러/워처 task를 재생성하여 즉시 반영
 - 무효하면 기존 설정을 유지하고 거부 로그 남김
 - 시작 시/핫리로드 시 `[CONFIG]` pretty JSON 스냅샷 출력
+
+### 10. GitHub Release 자동 업데이트
+
+- 진입점: `src/main.rs`의 `maybe_delegate_to_updater()`
+- 조회 대상: `ardi-orrorin/ardiex`의 latest release
+- 동작:
+1. 현재 버전(`CARGO_PKG_VERSION`)과 릴리즈 태그 비교
+2. 타깃(OS/ARCH)별 에셋(`.tar.gz`/`.zip`) 선택
+3. 신규 버전이면 `updater`(윈도우 `updater.exe`) 프로세스로 위임 후 본 프로세스 종료
+4. updater가 부모 종료 대기 후 바이너리 교체 및 재실행
+- 루프 방지: `ARDIEX_SKIP_UPDATE_CHECK=1`
+- 구현 파일:
+  - `src/update.rs`: 버전 비교, 릴리즈 API, 에셋 URL 선택
+  - `src/bin/updater.rs`: 다운로드/압축해제/교체/재실행
 
 ## 구현 패턴
 
@@ -288,6 +306,10 @@ enum ConfigAction {
 // full_backup_interval은 수동 설정하지 않고 max_backups 기준 자동 계산
 ```
 
+- 업데이트 실행 파일:
+  - `updater`는 별도 바이너리(`src/bin/updater.rs`)로 빌드/배포
+  - `ardiex`가 최신 버전 발견 시 `--repo --asset-url --asset-name --target-version --current-exe --parent-pid --forward-arg` 인자로 실행
+
 ### 3. 설정 파일 웹 편집기
 
 - 위치: `src/editor/settings-editor.html`
@@ -304,6 +326,12 @@ enum ConfigAction {
 - **노란색**: 경고
 - **빨간색**: 오류
 - **파란색**: 정보
+
+### 5. 릴리즈 파이프라인
+
+- 파일: `.github/workflows/release.yml`
+- 태그(`vX.Y.Z`) 푸시 시 build 단계 시작 전에 `Cargo.toml` 버전을 `X.Y.Z`로 동기화
+- 패키징 시 `ardiex`와 `updater` 바이너리를 함께 포함
 
 ## 테스트 전략
 
@@ -322,6 +350,7 @@ enum ConfigAction {
 - 설정/해상도 테스트: `src/tests/config_tests.rs`
 - delta 알고리즘 테스트: `src/tests/delta_tests.rs`
 - watcher 이벤트 필터/디바운스 테스트: `src/tests/watcher_tests.rs`
+- 업데이트 버전/에셋 선택 테스트: `src/tests/update_tests.rs`
 
 ### 2. 통합 테스트
 

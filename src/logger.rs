@@ -13,6 +13,7 @@ use std::sync::Mutex;
 const DEFAULT_MAX_LOG_FILE_SIZE_MB: u64 = 20;
 const MAX_ROTATED_LOG_FILES: usize = 30;
 const DATE_SUFFIX_PATTERN: &str = "%Y-%m-%d_%H-%M-%S";
+const DEFAULT_LOG_FILE_NAME: &str = "ardiex.log";
 
 struct TeeLogWriter<F: Write, O: Write> {
     file_writer: Mutex<F>,
@@ -74,9 +75,22 @@ fn apply_local_time_format(builder: &mut Builder) {
 }
 
 pub fn init_file_logging_with_size(log_dir: &PathBuf, max_log_file_size_mb: u64) -> Result<()> {
+    init_file_logging_with_size_and_name(log_dir, max_log_file_size_mb, DEFAULT_LOG_FILE_NAME)
+}
+
+pub fn init_file_logging_with_size_and_name(
+    log_dir: &PathBuf,
+    max_log_file_size_mb: u64,
+    log_file_name: &str,
+) -> Result<()> {
     fs::create_dir_all(log_dir)?;
 
-    let log_file = log_dir.join("ardiex.log");
+    let sanitized_log_file_name = if log_file_name.trim().is_empty() {
+        DEFAULT_LOG_FILE_NAME
+    } else {
+        log_file_name
+    };
+    let log_file = log_dir.join(sanitized_log_file_name);
     let size_mb = if max_log_file_size_mb == 0 {
         DEFAULT_MAX_LOG_FILE_SIZE_MB
     } else {

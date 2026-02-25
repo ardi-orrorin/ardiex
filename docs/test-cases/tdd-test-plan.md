@@ -16,6 +16,7 @@
   - `src/tests/delta_tests.rs`
   - `src/tests/restore_tests.rs`
   - `src/tests/watcher_tests.rs`
+  - `src/tests/update_tests.rs`
 - 통합 흐름 테스트: `backup`, `run` 핵심 시나리오 (임시 디렉토리 기반)
 
 ## TDD 공통 규칙
@@ -288,6 +289,48 @@
 - Refactor:
 1. mock 시나리오 파라미터화
 
+### D. 업데이트 버전/에셋 선택 (`src/tests/update_tests.rs`)
+
+#### TC-UPDATE-001 (P0) 버전 문자열 정규화는 접두사/메타정보를 제거해야 한다
+
+- 대상: `normalize_version()`
+- Red:
+1. `v1.2.3-beta+meta`가 그대로 남아야 한다고 작성해 실패 확인
+- Green:
+1. `v`/`V`, prerelease, build metadata 제거 결과 검증
+- Refactor:
+1. 입력 케이스를 테이블화
+
+#### TC-UPDATE-002 (P0) semver 비교는 숫자 크기대로 정렬되어야 한다
+
+- 대상: `compare_versions()`, `is_newer_version()`
+- Red:
+1. `1.10.0 < 1.2.0` 기대로 작성해 실패 확인
+- Green:
+1. `Ordering` 결과와 최신 버전 판별 결과 검증
+- Refactor:
+1. 비교 helper로 중복 제거
+
+#### TC-UPDATE-003 (P1) 릴리즈 에셋 누락 시 명확한 오류를 반환해야 한다
+
+- 대상: `find_release_asset_download_url()`
+- Red:
+1. 누락 에셋에서도 URL이 반환된다고 기대해 실패 확인
+- Green:
+1. 에러 메시지에 누락된 에셋 정보 포함 검증
+- Refactor:
+1. 가짜 릴리즈 fixture 재사용
+
+#### TC-UPDATE-004 (P1) 플랫폼 에셋 매핑은 지원 타깃만 허용해야 한다
+
+- 대상: `expected_release_asset_name_for_current_target()`
+- Red:
+1. 현재 타깃에서 빈 문자열 반환을 기대해 실패 확인
+- Green:
+1. 현재 OS/ARCH 조합에서 유효한 에셋명 포맷 반환 검증
+- Refactor:
+1. 포맷 검증 공통 helper화
+
 ## 케이스-코드 매핑 (자동화 현황)
 
 | 케이스 | 상태 | 테스트 함수 |
@@ -316,6 +359,10 @@
 | TC-LOGGER-004 | 자동화 완료 | `tee_writer_flushes_both_targets` |
 | TC-LOGGER-005 | 자동화 완료 | `tee_writer_stops_when_file_flush_fails` |
 | TC-LOGGER-006 | 자동화 완료 | `tee_writer_returns_stdout_flush_error_after_file_flush` |
+| TC-UPDATE-001 | 자동화 완료 | `normalize_version_strips_prefix_and_prerelease` |
+| TC-UPDATE-002 | 자동화 완료 | `compare_versions_orders_semver_triplets`, `is_newer_version_detects_candidate_newer` |
+| TC-UPDATE-003 | 자동화 완료 | `find_release_asset_download_url_returns_error_for_missing_asset` |
+| TC-UPDATE-004 | 부분 자동화 | `expected_release_asset_name_for_current_target` 직접 테스트 추가 예정 |
 
 ## 추가 회귀 테스트
 
@@ -323,6 +370,7 @@
 - delta 생성/적용/직렬화 roundtrip: `src/tests/delta_tests.rs`
 - 복구 선택/적용/cutoff/empty 처리: `src/tests/restore_tests.rs`
 - watcher 필터/디바운스/버스트 이벤트 처리: `src/tests/watcher_tests.rs`
+- 업데이트 버전 비교/에셋 선택 오류: `src/tests/update_tests.rs`
 
 ## 실패 경로 커버리지 인덱스
 
@@ -333,14 +381,15 @@
   - `src/tests/backup_tests.rs`: metadata history 불일치, full 없는 inc history
   - `src/tests/delta_tests.rs`: invalid delta JSON, missing file/new file
   - `src/tests/restore_tests.rs`: invalid delta 복구 실패
+  - `src/tests/update_tests.rs`: 릴리즈 에셋 누락 오류
 - 런타임/핫리로드 실패:
   - `src/tests/run_cmd_tests.rs`: invalid cron 거부, hot-reload skip 조건 검증
   - `src/tests/watcher_tests.rs`: temp/lock 이벤트 무시, sender disconnect 시 트리거 없음
 
 ## 구현 순서 권장 (TDD 스프린트)
 
-1. Sprint 1 (P0): TC-BACKUP-001~006, TC-RUN-001~003, TC-LOGGER-001~003
-2. Sprint 2 (P1): TC-BACKUP-007~010, TC-RUN-004~006, TC-LOGGER-004~005
+1. Sprint 1 (P0): TC-BACKUP-001~006, TC-RUN-001~003, TC-LOGGER-001~003, TC-UPDATE-001~002
+2. Sprint 2 (P1): TC-BACKUP-007~010, TC-RUN-004~006, TC-LOGGER-004~005, TC-UPDATE-003~004
 3. Sprint 3 (P2): TC-BACKUP-011~012, TC-LOGGER-006
 
 ## PR 체크리스트
@@ -348,14 +397,14 @@
 1. 새 기능마다 Red 커밋(실패 테스트) 이력이 있는가
 2. Green 커밋에서 최소 구현으로 테스트를 통과시켰는가
 3. Refactor 커밋에서 테스트가 동일하게 통과하는가
-4. `cargo test -q` 전체 통과 여부
+4. `cargo test --all-targets -q` 전체 통과 여부
 5. 새 테스트가 `src/tests` 폴더 규칙을 따르는가
 6. 기능 추가/코드 수정 시 관련 테스트를 수정 또는 추가했는가
 
 ## 실행 명령 예시
 
 ```bash
-cargo test -q
+cargo test --all-targets -q
 cargo test backup_tests -q
 cargo test run_cmd_tests -q
 cargo test logger_tests -q
@@ -363,4 +412,5 @@ cargo test config_tests -q
 cargo test delta_tests -q
 cargo test restore_tests -q
 cargo test watcher_tests -q
+cargo test update_tests -q
 ```
